@@ -28,7 +28,7 @@ CN_FONT = 'PingFang SC, Microsoft YaHei, SimHei, Arial Unicode MS, sans-serif'
 
 def plot_backtest(data, strategy_name, chart_mode="K线图",
                   buy_points=None, sell_points=None,
-                  trades=None, yaxis_range=None):
+                  trades=None, yaxis_range=None, xaxis_range=None):
     """
     生成 Plotly 交互式回测图表。
 
@@ -36,6 +36,8 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     ----------
     yaxis_range : tuple (min, max) or None
         纵轴价格范围，用于缩放 K 线高度。None 时自动适配。
+    xaxis_range : tuple (str, str) or None
+        横轴日期范围（'YYYY-MM-DD' 格式），传入后覆盖默认最近 90 根 K 线。
 
     Returns
     -------
@@ -132,7 +134,9 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     )
 
     # ---- 默认可视范围：最近 90 根 K 线，保证蜡烛有足够宽度 ----
-    if n > 90:
+    if xaxis_range is not None:
+        default_x0, default_x1 = xaxis_range[0], xaxis_range[1]
+    elif n > 90:
         default_x0 = dti[n - 90]
         default_x1 = dti[-1]
     else:
@@ -149,8 +153,21 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         increasing_line_width=1.2, decreasing_line_width=1.2,
         whiskerwidth=0.8,
         showlegend=False,
-        hoverinfo='none',
+        hoverinfo='x',
+        hoverlabel=dict(font=dict(size=10)),
     ), row=1, col=1)
+
+    # ---- 散点层：捕获点击事件用于缩放（在高、低价位各放一排，覆盖整根 K 线） ----
+    for y_col in ['high', 'low']:
+        fig.add_trace(go.Scatter(
+            x=dti, y=df[y_col],
+            mode='markers',
+            marker=dict(size=28, opacity=0.01, color='rgba(255,255,255,0.01)'),
+            hoverinfo='skip',
+            showlegend=False,
+            name='_click_capture',
+            text=[d.strftime('%Y-%m-%d') for d in dti],
+        ), row=1, col=1)
 
     # MA5
     fig.add_trace(go.Scatter(
@@ -235,9 +252,11 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         # --- Hover ---
         hovermode='closest',
 
+        # --- Click to zoom ---
+        clickmode='event+select',
+
         # --- 范围滑块：拖拽缩放时间轴，蜡烛宽度自适应变化 ---
         xaxis_rangeslider_thickness=0.06,
-        xaxis_range=[default_x0, default_x1],
 
         # --- Legend ---
         showlegend=True,
@@ -251,7 +270,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         margin=dict(l=60, r=30, t=55, b=40),
 
         # --- Drag mode ---
-        dragmode='pan',
+        dragmode='select',
     )
 
     # X axis
@@ -265,6 +284,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
             bgcolor='#1c1f2e',
             bordercolor=GRID_C,
             borderwidth=1,
+            range=[default_x0, default_x1],
         ),
     )
 
@@ -290,6 +310,10 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         row=2, col=1,
         gridcolor=GRID_C, showgrid=True,
     )
+
+    # ---- 显式缩放：仅在点击 K 线触发缩放时覆盖横轴范围 ----
+    if xaxis_range is not None:
+        fig.update_layout(xaxis_range=[xaxis_range[0], xaxis_range[1]])
 
     return fig
 

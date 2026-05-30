@@ -3,6 +3,7 @@
 回测引擎 v2 — 增加策略名称和触发原因捕获
 """
 
+import sys
 import backtrader as bt
 import pandas as pd
 import numpy as np
@@ -89,7 +90,11 @@ def _make_logged_strategy(base_class, strategy_name):
                     'entry_reason': entry_reason, 'exit_reason': exit_reason,
                 })
     # 让 backtrader 在 sys.modules 中找到策略类的模块
-    LoggedStrategy.__module__ = base_class.__module__
+    import inspect
+    mod = inspect.getmodule(base_class)
+    if mod is not None:
+        LoggedStrategy.__module__ = mod.__name__
+        sys.modules[mod.__name__] = mod
     return LoggedStrategy
 
 

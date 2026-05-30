@@ -42,6 +42,7 @@ def render():
 
     # ========== 回测 ==========
     if st.button("开始回测", type="primary", use_container_width=True):
+        st.session_state.zoom_range = None
         with st.spinner("获取数据..."):
             if data_source == "演示数据":
                 data = generate_demo_data(300)
@@ -58,70 +59,122 @@ def render():
                 strategy_name=strategy_name,
             )
 
-        st.divider()
+        st.session_state.backtest_result = result
 
-        # ===== 指标面板 =====
-        m = result["metrics"]
-        mn1, mn2, mn3 = st.columns(3)
-        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        mn2.metric("最大回撤", m["最大回撤"])
-        mn3.metric("夏普比率", m["夏普比率"])
-        mn4, mn5, mn6 = st.columns(3)
-        mn4.metric("胜率", m["胜率"])
-        mn5.metric("交易次数", m["交易次数"])
-        mn6.metric("最终资金", m["最终资金"])
+    # ========== 渲染结果 ==========
+    if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
+        st.info("点击「开始回测」查看结果")
+        return
 
-        st.divider()
+    result = st.session_state.backtest_result
 
-        # ===== 策略大白话解释（可折叠） =====
-        explanation = result.get("explanation", {})
-        if explanation:
-            with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
-                st.markdown(render_strategy_card(strategy_name, explanation))
+    st.divider()
 
-        # ===== 纵轴范围滑块 =====
-        import numpy as np
-        full_high = float(result["data"]["high"].max())
-        full_low = float(result["data"]["low"].min())
-        pad = (full_high - full_low) * 0.15
-        price_lo, price_hi = st.slider(
-            "纵轴（价格）范围",
-            min_value=float(int(full_low - pad)),
-            max_value=float(int(full_high + pad) + 1),
-            value=(full_low, full_high),
-            step=0.5,
-            key="price_slider",
-        )
+    # ===== 指标面板 =====
+    m = result["metrics"]
+    mn1, mn2, mn3 = st.columns(3)
+    mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    mn2.metric("最大回撤", m["最大回撤"])
+    mn3.metric("夏普比率", m["夏普比率"])
+    mn4, mn5, mn6 = st.columns(3)
+    mn4.metric("胜率", m["胜率"])
+    mn5.metric("交易次数", m["交易次数"])
+    mn6.metric("最终资金", m["最终资金"])
 
-        # ===== Plotly 交互式图表 =====
-        fig = plot_backtest(
-            result["data"],
-            strategy_name,
-            chart_mode=chart_mode,
-            buy_points=result["buy_points"],
-            sell_points=result["sell_points"],
-            trades=result["trades"],
-            yaxis_range=(price_lo, price_hi),
-        )
-        st.plotly_chart(fig, use_container_width=True, config={
+    st.divider()
+
+    # ===== 策略大白话解释（可折叠） =====
+    explanation = result.get("explanation", {})
+    if explanation:
+        with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
+            st.markdown(render_strategy_card(strategy_name, explanation))
+
+    # ===== 纵轴范围滑块 =====
+    import numpy as np
+    full_high = float(result["data"]["high"].max())
+    full_low = float(result["data"]["low"].min())
+    pad = (full_high - full_low) * 0.15
+    price_lo, price_hi = st.slider(
+        "纵轴（价格）范围",
+        min_value=float(int(full_low - pad)),
+        max_value=float(int(full_high + pad) + 1),
+        value=(full_low, full_high),
+        step=0.5,
+        key="price_slider",
+    )
+
+    # ===== 重置缩放按钮 =====
+    xaxis_range = st.session_state.get("zoom_range", None)
+    if xaxis_range is not None:
+        zc1, zc2 = st.columns([1, 5])
+        with zc1:
+            if st.button("重置缩放", key="reset_zoom"):
+                st.session_state.zoom_range = None
+                st.rerun()
+
+    # ===== Plotly 交互式图表 =====
+    fig = plot_backtest(
+        result["data"],
+        result["strategy_name"],
+        chart_mode=chart_mode,
+        buy_points=result["buy_points"],
+        sell_points=result["sell_points"],
+        trades=result["trades"],
+        yaxis_range=(price_lo, price_hi),
+        xaxis_range=xaxis_range,
+    )
+    chart_event = st.plotly_chart(
+        fig, use_container_width=True,
+        key="kline_chart",
+        on_select="rerun",
+        selection_mode=["points"],
+        config={
             'displayModeBar': True,
             'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
             'displaylogo': False,
-        })
+            'doubleClick': False,
+        },
+    )
 
-        # ===== 交易明细 =====
-        if result["trades"]:
-            st.subheader("交易明细")
-            trade_df = pd.DataFrame(result["trades"])
-            # 只展示关键列
-            display_cols = [c for c in ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"] if c in trade_df.columns]
-            st.dataframe(
-                trade_df[display_cols],
-                use_container_width=True, hide_index=True,
-                column_config={
-                    "买入价": st.column_config.NumberColumn(format="¥%.2f"),
-                    "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
-                }
-            )
+    # ===== 诊断信息 =====
+    import streamlit as _stv
+    st.caption(f"Streamlit 版本: {_stv.__version__}")
+    st.caption(f"chart_event 类型: {type(chart_event).__name__}, 是否为 None: {chart_event is None}")
+
+    # ===== 处理点击缩放 =====
+    import json as _json
+    if chart_event is not None:
+        st.warning(f"收到点击事件: {_json.dumps(str(chart_event))[:200]}")
+        if hasattr(chart_event, 'selection') and chart_event.selection and chart_event.selection.get("points"):
+            pt = chart_event.selection["points"][0]
+            clicked_date = pt.get("x")
+            if clicked_date:
+                dti = pd.to_datetime(result["data"].index)
+                target = pd.Timestamp(clicked_date)
+                pos = (dti - target).abs().argmin()
+                start = max(0, pos - 15)
+                end = min(len(dti) - 1, pos + 15)
+                st.session_state.zoom_range = (
+                    dti[start].strftime('%Y-%m-%d'),
+                    dti[end].strftime('%Y-%m-%d'),
+                )
+                st.success(f"缩放至: {st.session_state.zoom_range}")
+                st.rerun()
         else:
-            st.info("本次回测期间无交易记录")
+            st.warning(f"事件结构不符: sel={hasattr(chart_event,'selection')}, pts={chart_event.selection.get('points') if hasattr(chart_event,'selection') else 'N/A'}")
+
+    # ===== 交易明细 =====
+    if result["trades"]:
+        st.subheader("交易明细")
+        trade_df = pd.DataFrame(result["trades"])
+        display_cols = [c for c in ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"] if c in trade_df.columns]
+        st.dataframe(
+            trade_df[display_cols],
+            use_container_width=True, hide_index=True,
+            column_config={
+                "买入价": st.column_config.NumberColumn(format="¥%.2f"),
+                "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
+            }
+        )
+    else:
+        st.info("本次回测期间无交易记录")
