@@ -136,32 +136,32 @@ def render():
         },
     )
 
-    # ===== 诊断信息 =====
-    import streamlit as _stv
-    st.caption(f"Streamlit 版本: {_stv.__version__}")
-    st.caption(f"chart_event 类型: {type(chart_event).__name__}, 是否为 None: {chart_event is None}")
+    st.caption("提示：点击某根 K 线（轻微拖动即可选中）→ 自动放大到该日前后约一个月范围；拖拽多根 K 线 → 精确放大到所选区间")
 
-    # ===== 处理点击缩放 =====
-    import json as _json
+    # ===== 处理点击/框选缩放 =====
     if chart_event is not None:
-        st.warning(f"收到点击事件: {_json.dumps(str(chart_event))[:200]}")
         if hasattr(chart_event, 'selection') and chart_event.selection and chart_event.selection.get("points"):
-            pt = chart_event.selection["points"][0]
-            clicked_date = pt.get("x")
-            if clicked_date:
-                dti = pd.to_datetime(result["data"].index)
-                target = pd.Timestamp(clicked_date)
+            points = chart_event.selection["points"]
+            dates = sorted(set(pt.get("x") for pt in points if pt.get("x")))
+            if not dates:
+                st.rerun()
+            dti = pd.to_datetime(result["data"].index)
+            if len(dates) == 1:
+                # 单根 K 线点击 → 放大到 ±15 个交易日（约一个月）
+                target = pd.Timestamp(dates[0])
                 pos = (dti - target).abs().argmin()
                 start = max(0, pos - 15)
                 end = min(len(dti) - 1, pos + 15)
-                st.session_state.zoom_range = (
-                    dti[start].strftime('%Y-%m-%d'),
-                    dti[end].strftime('%Y-%m-%d'),
-                )
-                st.success(f"缩放至: {st.session_state.zoom_range}")
-                st.rerun()
-        else:
-            st.warning(f"事件结构不符: sel={hasattr(chart_event,'selection')}, pts={chart_event.selection.get('points') if hasattr(chart_event,'selection') else 'N/A'}")
+            else:
+                # 多根 K 线框选 → 精确范围
+                t0, t1 = pd.Timestamp(dates[0]), pd.Timestamp(dates[-1])
+                start = max(0, (dti - t0).abs().argmin())
+                end = min(len(dti) - 1, (dti - t1).abs().argmin())
+            st.session_state.zoom_range = (
+                dti[start].strftime('%Y-%m-%d'),
+                dti[end].strftime('%Y-%m-%d'),
+            )
+            st.rerun()
 
     # ===== 交易明细 =====
     if result["trades"]:
