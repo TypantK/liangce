@@ -61,10 +61,10 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     ]
 
     # ---- 构建买卖点 scatter 数据 ----
-    bp_idx = [dti[idx] for idx, _ in buy_points if idx < n]
-    bp_val = [p for idx, p in buy_points if idx < n]
-    sp_idx = [dti[idx] for idx, _ in sell_points if idx < n]
-    sp_val = [p for idx, p in sell_points if idx < n]
+    bp_idx = [dti[idx + 1] for idx, _ in buy_points if idx + 1 < n]
+    bp_val = [p for idx, p in buy_points if idx + 1 < n]
+    sp_idx = [dti[idx + 1] for idx, _ in sell_points if idx + 1 < n]
+    sp_val = [p for idx, p in sell_points if idx + 1 < n]
 
     # ---- 构建 hover 浮窗文本 ----
     # 将 trades 按买入/卖出时间建立索引，方便 hover 时匹配到具体盈亏
