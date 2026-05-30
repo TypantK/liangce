@@ -1,0 +1,82 @@
+<h2>Feature A · 策略分析页 设计稿</h2>
+<p class="subtitle">Plotly 交互式K线 + 策略概述 + 悬停弹窗</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">页面顶部 · 策略概述卡片</div>
+    <div class="mockup-body" style="background:#131520;min-height:90px;padding:14px;font-size:13px">
+      <div style="display:flex;gap:12px">
+        <div style="flex:2">
+          <span style="color:#4da6ff;font-weight:bold;font-size:15px">MACD 策略</span><br>
+          <span style="color:#6b7094;font-size:12px">MACD 金叉买入、死叉卖出，带固定止损。趋势跟踪经典策略。</span>
+        </div>
+        <div style="flex:1;font-size:11px;color:#6b7094;text-align:right">
+          快线12 · 慢线26 · 信号9 · 止损3%<br>
+          交易5笔 · 胜率60% · 收益+18.5%
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-bottom:20px">
+  <div class="mockup-header">策略大白话解释（折叠面板）</div>
+  <div class="mockup-body" style="background:#131520;padding:14px;font-size:13px;color:#c8cce0">
+    <p style="color:#f5a623;font-weight:bold;margin-bottom:6px">一句话：追踪两指数移动平均线的交叉信号，金叉买、死叉卖。</p>
+    <p style="color:#6b7094;font-size:12px;margin-bottom:8px">MACD 由三部分组成：快线（DIF）是12日均线和26日均线的差值，慢线（DEA）是快线的9日均值，柱状图是两者的差。当快线从下往上穿过慢线（金叉），说明买盘力量增强，我们买入；当快线从上往下穿过慢线（死叉），说明卖盘力量增强，我们卖出。同时设置了3%止损线，单笔亏损超过3%就强行平仓。</p>
+    <div style="display:flex;gap:12px;font-size:11px">
+      <div style="flex:1;background:#1c1f2e;padding:10px;border-radius:4px;border-left:3px solid #00e5ff">
+        <span style="color:#00e5ff;font-weight:bold">买入条件</span><br>
+        <span style="color:#6b7094">1. 当前无持仓<br>2. MACD金叉（DIF线上穿DEA线）</span>
+      </div>
+      <div style="flex:1;background:#1c1f2e;padding:10px;border-radius:4px;border-left:3px solid #ff6e40">
+        <span style="color:#ff6e40;font-weight:bold">卖出条件</span><br>
+        <span style="color:#6b7094">1. 当前有持仓<br>2. MACD死叉 / 或亏损>3%止损</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-bottom:20px">
+  <div class="mockup-header">核心 · Plotly 交互式K线图</div>
+  <div class="mockup-body" style="background:#131520;min-height:200px;padding:14px;text-align:center">
+    <div style="background:#1c1f2e;border:1px solid #2a2d3e;border-radius:4px;padding:20px;display:inline-block;width:100%">
+      <p style="color:#fff;margin-bottom:12px">K 线区域（Plotly 蜡烛图，深色主题）</p>
+      <div style="display:flex;justify-content:space-around;margin-bottom:8px">
+        <div style="background:rgba(0,229,255,0.15);border:1px solid #00e5ff;border-radius:6px;padding:8px 14px">
+          <span style="color:#00e5ff;font-size:16px">▲ 买入</span><br>
+          <span style="color:#6b7094;font-size:11px">悬停显示：MACD金叉，买入2300股 @40.21</span>
+        </div>
+        <div style="background:rgba(255,110,64,0.15);border:1px solid #ff6e40;border-radius:6px;padding:8px 14px">
+          <span style="color:#ff6e40;font-size:16px">▼ 卖出</span><br>
+          <span style="color:#6b7094;font-size:11px">悬停显示：MACD死叉，清仓获利 ¥649</span>
+        </div>
+      </div>
+      <p style="color:#6b7094;font-size:11px;margin-top:8px">下方：成交量柱状图 | 鼠标悬停三角标记弹出浮窗</p>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-bottom:20px">
+  <div class="mockup-header">底部 · 交易明细表格</div>
+  <div class="mockup-body" style="background:#131520;padding:14px;font-size:12px">
+    <table style="width:100%;border-collapse:collapse;color:#c8cce0">
+      <tr style="color:#6b7094;font-size:11px"><td style="padding:6px 10px">买入时间</td><td>买入价</td><td>卖出时间</td><td>卖出价</td><td>盈亏</td><td>触发条件</td></tr>
+      <tr><td style="padding:6px 10px">2024-03-14</td><td style="color:#00e5ff">40.21</td><td>2024-03-17</td><td style="color:#ff6e40">40.49</td><td style="color:#26c281">+649.80</td><td style="color:#6b7094;font-size:11px">MACD金叉→死叉</td></tr>
+      <tr><td style="padding:6px 10px">2024-06-23</td><td style="color:#00e5ff">40.29</td><td>2024-08-09</td><td style="color:#ff6e40">60.92</td><td style="color:#26c281">+49176</td><td style="color:#6b7094;font-size:11px">MACD金叉→死叉</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <h3>设计要点总结</h3>
+  <table style="width:100%;border-collapse:collapse;color:#c8cce0;font-size:13px">
+    <tr style="background:#1c1f2e"><td style="padding:8px 12px;color:#6b7094;width:140px">图表引擎</td><td>mplfinance → Plotly（交互浮窗）</td></tr>
+    <tr><td style="padding:8px 12px;color:#6b7094">触发原因</td><td>引擎改造：notify_trade 中记录触发条件（金叉/死叉/止损）</td></tr>
+    <tr style="background:#1c1f2e"><td style="padding:8px 12px;color:#6b7094">大白话解释</td><td>每个策略配一段人话说明，买/卖条件卡片化展示</td></tr>
+    <tr><td style="padding:8px 12px;color:#6b7094">配色</td><td>深色背景 #131520，买青买橙，红涨绿跌K线，与参考图类似</td></tr>
+    <tr style="background:#1c1f2e"><td style="padding:8px 12px;color:#6b7094">悬停内容</td><td>日期 + 价格 + 触发条件（如「MACD金叉，买入2300股」）</td></tr>
+  </table>
+</div>
+
+<p style="color:#4da6ff;font-size:13px;margin-top:8px">打开 http://localhost:63676 看完整版，确认后可进入实现阶段</p>

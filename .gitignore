@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Streamlit
+.streamlit/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

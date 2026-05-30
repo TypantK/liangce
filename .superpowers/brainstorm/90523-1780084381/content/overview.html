@@ -1,0 +1,70 @@
+<h2>「量策」V2 - 两大核心功能定位</h2>
+<p class="subtitle">基于你的参考图 & 现有项目，两个功能模块怎么放？</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">A · 策略可视化分析</div>
+    <div class="mockup-body" style="background:#131520;min-height:220px;padding:12px;color:#c8cce0;font-size:12px">
+      <div style="text-align:center;margin-bottom:8px;font-weight:bold;color:#4da6ff">MACD 策略 · K线图</div>
+      <div style="background:#1c1f2e;border:1px solid #2a2d3e;padding:10px;border-radius:4px;margin-bottom:8px">
+        <span style="color:#4da6ff;font-weight:bold">策略概述</span>
+        <p style="margin:4px 0;color:#6b7094">当快线（MACD线）从下方上穿慢线（信号线）时，说明上涨势头来了，我们买入；当快线下穿慢线时，势头没了，我们卖出。同时设了3%止损防止亏太多。</p>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <div style="flex:1;background:#1c1f2e;padding:8px;border-left:3px solid #00e5ff;border-radius:3px">
+          <span style="color:#00e5ff;font-size:10px">▲ 2024-03-14 买入 @40.21</span><br>
+          <span style="color:#6b7094;font-size:10px">触发：MACD金叉（MACD线上穿信号线），买入2300股</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <div style="flex:1;background:#1c1f2e;padding:8px;border-left:3px solid #ff6e40;border-radius:3px">
+          <span style="color:#ff6e40;font-size:10px">▼ 2024-03-17 卖出 @40.49</span><br>
+          <span style="color:#6b7094;font-size:10px">触发：MACD死叉，清仓获利 ¥649.80</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">B · 每日热点归因</div>
+    <div class="mockup-body" style="background:#131520;min-height:220px;padding:12px;color:#c8cce0;font-size:12px">
+      <div style="text-align:center;margin-bottom:8px;font-weight:bold;color:#f5a623">AVGO 股价波动归因</div>
+      <div style="background:rgba(38,194,129,0.15);border:1px solid #26c281;padding:6px;margin-bottom:6px;border-radius:3px;font-size:10px">
+        <span style="color:#26c281">利好</span> 2025-03 财报超预期 → 股价+15%
+      </div>
+      <div style="background:rgba(231,80,90,0.15);border:1px solid #e7505a;padding:6px;margin-bottom:6px;border-radius:3px;font-size:10px">
+        <span style="color:#e7505a">利空</span> 2025-04 关税政策出台 → 股价-12%
+      </div>
+      <div style="background:rgba(38,194,129,0.15);border:1px solid #26c281;padding:6px;margin-bottom:6px;border-radius:3px;font-size:10px">
+        <span style="color:#26c281">利好</span> 2025-06 AI芯片订单大增 → 股价+8%
+      </div>
+      <div style="margin-top:8px;padding:6px;background:#1c1f2e;border-radius:3px;font-size:10px">
+        <span style="color:#f5a623">数据来源</span> 
+        <span style="color:#6b7094">实时抓取财经新闻 → AI 摘要 → K线叠加</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>确认布局方向</h3>
+  <p>两个功能放在同一应用的两个 Tab/页面中。A 侧重「策略学习」，B 侧重「热点复盘」。</p>
+  <p style="color:#6b7094;font-size:13px">你给的参考图主要启发 B 模块 —— K线上叠事件框、标注触发原因。接下来我们分别细化。</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>先细化 A · 策略分析</h3>
+      <p>确定 K 线图上策略操作标注的样式、触发条件展示方式、策略大白话总结的位置</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>先细化 B · 热点归因</h3>
+      <p>讨论热点数据来源（微博热搜/财经新闻/Twitter）、AI 摘要方式、K 线叠加样式</p>
+    </div>
+  </div>
+</div>
