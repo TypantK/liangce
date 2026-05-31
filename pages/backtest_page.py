@@ -94,6 +94,22 @@ def _build_chart_html(fig, version=0):
             log('zoom \u00b115');
         }});
 
+        // Box-select handler
+        gd.on('plotly_selected', function(data) {{
+            if (!data || !data.range || !data.range.x) return;
+            if (!data.points || !data.points.length) {{
+                Plotly.relayout(gd, {{'xaxis.range': [data.range.x[0], data.range.x[1]]}});
+                return;
+            }}
+            var allX = data.points[0].data.x;
+            if (!allX || !allX.length) return;
+            var startIdx = findDateIndex(allX, data.range.x[0]);
+            var endIdx = findDateIndex(allX, data.range.x[1]);
+            if (startIdx >= 0 && endIdx >= 0) {{
+                zoomToRange(allX, startIdx, endIdx);
+            }}
+        }});
+
         log('ready');
     }}
 

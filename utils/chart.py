@@ -167,7 +167,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         click_x_hi.append(dti[i]); click_y_hi.append(float(df['high'].iloc[i])); click_text_hi.append(t)
         click_x_lo.append(dti[i]); click_y_lo.append(float(df['low'].iloc[i]));  click_text_lo.append(t)
 
-    marker_opts = dict(size=28, opacity=0.01, color='rgba(255,255,255,0.01)')
+    marker_opts = dict(size=40, opacity=0.01, color='rgba(255,255,255,0.01)')
     fig.add_trace(go.Scatter(
         x=click_x_hi, y=click_y_hi, mode='markers', marker=marker_opts,
         hoverinfo='skip', showlegend=False, name='_click_cap_hi', text=click_text_hi,
@@ -276,6 +276,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
 
         # --- Drag mode ---
         dragmode='pan',
+        clickmode='event',
     )
 
     # X axis — rangeslider 初始范围通过 xaxis.range 设，rangeslider 内部不硬编码 range，
