@@ -76,7 +76,7 @@ def _build_chart_html(fig, version=0):
         console.table(_vLog.map(function(s) {{ return {{entry:s}}; }}));
     }}
 
-    // ─── DUMP TO FILE (via sendBeacon, bypasses CORS) ─────────────────
+    // ─── DUMP TO FILE (img beacon, zero CORS issues) ──────────────────
     var _dumpUrl = 'http://127.0.0.1:19876/log';
     function dumpToFile() {{
         var payload = JSON.stringify({{
@@ -85,10 +85,10 @@ def _build_chart_html(fig, version=0):
             dragmode: (gd._fullLayout||{{}}).dragmode,
             clickCount: clickCount,
             log: _vLog}});
-        // sendBeacon has NO CORS restrictions — works from iframes
-        var blob = new Blob([payload], {{type:'application/json'}});
-        var ok = navigator.sendBeacon(_dumpUrl, blob);
-        console.log('[chart] beacon ' + (ok?'sent':'fail'));
+        // img beacon: no preflight, no CORS, works everywhere
+        var img = new Image();
+        img.src = _dumpUrl + '?d=' + encodeURIComponent(payload);
+        img.onerror = function(){{ /* expected: server closes after 200 */ }};
     }}
 
     // Also expose manual dump via keyboard: press 'd' key
