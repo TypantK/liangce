@@ -120,7 +120,11 @@ def _build_chart_html(fig, version=0):
             rebindLock = true;
             setTimeout(function() {{
                 bindClickHandlers();
-                rebindLock = false;
+                // Warm up the drag pipeline after rebind (autoscale kills it)
+                var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
+                Plotly.relayout(gd, {{dragmode: cd}});
+                // rebindLock stays true, preventing re-entry from the warm-up relayout
+                setTimeout(function() {{ rebindLock = false; }}, 150);
             }}, 80);
         }});
 
