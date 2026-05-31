@@ -146,16 +146,17 @@ def _build_chart_html(fig, version=0):
                 'xaxis.range': [allX[startIdx], allX[endIdx]]
             }};
             // Y 轴同步 — 取 Candlestick trace 中区间内 high/low 极值
-            var traces = gd.data;
-            for (var t = 0; t < traces.length; t++) {{
-                var tr = traces[t];
-                if (tr.type === 'candlestick' && tr.high && tr.low) {{
+            var fullTraces = gd._fullData || gd.data;
+            for (var t = 0; t < fullTraces.length; t++) {{
+                var tr = fullTraces[t];
+                if ((tr.type === 'candlestick' || tr.type === 'ohlc') && tr.high && tr.low) {{
                     var yHi = -Infinity, yLo = Infinity;
                     for (var i = startIdx; i <= endIdx; i++) {{
-                        if (tr.high[i] > yHi) yHi = tr.high[i];
-                        if (tr.low[i] < yLo) yLo = tr.low[i];
+                        var hi = tr.high[i], lo = tr.low[i];
+                        if (hi != null && hi > yHi) yHi = hi;
+                        if (lo != null && lo < yLo) yLo = lo;
                     }}
-                    if (yHi > yLo) {{
+                    if (isFinite(yHi) && isFinite(yLo) && yHi > yLo) {{
                         var pad = (yHi - yLo) * 0.08;
                         relayoutObj['yaxis.range'] = [yLo - pad, yHi + pad];
                     }}
@@ -244,6 +245,19 @@ def _build_chart_html(fig, version=0):
                 if (isAutoscale) {{
                     vlog('RELAYOUT setting autorange=false');
                     Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
+                    // Auto zoomout after autoscale
+                    setTimeout(function() {{
+                        var xr = ((gd._fullLayout || {{}}).xaxis || {{}}).range;
+                        if (xr && xr[0] && xr[1]) {{
+                            var t0 = new Date(xr[0]).getTime();
+                            var t1 = new Date(xr[1]).getTime();
+                            var mid = (t0 + t1) / 2;
+                            var halfSpan = (t1 - t0) / 2 * 1.2;
+                            Plotly.relayout(gd, {{
+                                'xaxis.range': [new Date(mid - halfSpan).toISOString(), new Date(mid + halfSpan).toISOString()]
+                            }});
+                        }}
+                    }}, 50);
                     setTimeout(function() {{
                         dumpAutorangeState('after-disable-autorange');
                         bindClickHandlers();
@@ -340,6 +354,13 @@ def _build_chart_html(fig, version=0):
             Plotly.relayout(gd, {{dragmode: 'pan'}});
             if (dbg) {{
                 dbg.textContent = 'Tool: PAN';
+                setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
+            }}
+        }} else if (key === 'e') {{
+            e.preventDefault();
+            Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+            if (dbg) {{
+                dbg.textContent = 'AUTOSCALE';
                 setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
             }}
         }}
