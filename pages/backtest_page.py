@@ -76,23 +76,28 @@ def _build_chart_html(fig, version=0):
         console.table(_vLog.map(function(s) {{ return {{entry:s}}; }}));
     }}
 
-    // ─── DUMP TO FILE ───────────────────────────────────────────────
+    // ─── DUMP TO FILE (via sendBeacon, bypasses CORS) ─────────────────
     var _dumpUrl = 'http://127.0.0.1:19876/log';
-    var _dumpSeq = 0;
     function dumpToFile() {{
-        _dumpSeq++;
-        var payload = JSON.stringify({{seq:_dumpSeq, time:new Date().toISOString(),
+        var payload = JSON.stringify({{
+            time: new Date().toISOString(),
             autorange: {{x:(gd._fullLayout||{{}}).xaxis||{{}}.autorange, y:(gd._fullLayout||{{}}).yaxis||{{}}.autorange}},
             dragmode: (gd._fullLayout||{{}}).dragmode,
             clickCount: clickCount,
             log: _vLog}});
-        try {{
-            fetch(_dumpUrl, {{method:'POST', body:payload, headers:{{'Content-Type':'application/json'}}}})
-                .then(function(r){{ return r.text(); }})
-                .then(function(t){{ console.log('[chart] dump#'+_dumpSeq+' ok:', t); }})
-                .catch(function(e){{ console.log('[chart] dump#'+_dumpSeq+' err:', e.message); }});
-        }} catch(e) {{ console.log('[chart] dump fetch err:', e); }}
+        // sendBeacon has NO CORS restrictions — works from iframes
+        var blob = new Blob([payload], {{type:'application/json'}});
+        var ok = navigator.sendBeacon(_dumpUrl, blob);
+        console.log('[chart] beacon ' + (ok?'sent':'fail'));
     }}
+
+    // Also expose manual dump via keyboard: press 'd' key
+    document.addEventListener('keydown', function(e) {{
+        if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {{
+            dumpToFile();
+            console.log('[chart] manual dump triggered');
+        }}
+    }});
 
     // Auto-dump on every vlog (debounced 1s)
     var _dumpTimer = null;
