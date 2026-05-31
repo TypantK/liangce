@@ -278,18 +278,20 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         dragmode='pan',
     )
 
-    # X axis
+    # X axis — rangeslider 初始范围通过 xaxis.range 设，rangeslider 内部不硬编码 range，
+    # 配合 autorange=False 避免拖动后回弹。
     fig.update_xaxes(
         gridcolor=GRID_C, showgrid=True, zeroline=False,
         linecolor='#2a2d3e', linewidth=1,
         title_font=dict(color=FG_SOFT, family=CN_FONT),
+        autorange=False,
+        range=[default_x0, default_x1],
         rangeslider=dict(
             visible=True,
             thickness=0.06,
             bgcolor='#1c1f2e',
             bordercolor=GRID_C,
             borderwidth=1,
-            range=[default_x0, default_x1],
         ),
     )
 
