@@ -49,8 +49,8 @@ class RSIStrategy(bt.Strategy):
     """RSI + 跟踪止损"""
     params = (
         ('rsi_period', 14),
-        ('oversold', 30),
-        ('overbought', 70),
+        ('oversold', 35),
+        ('overbought', 65),
         ('trailing_stop', 3.0),
     )
 
@@ -171,8 +171,8 @@ STRATEGY_REGISTRY = {
     },
     "RSI 超买超卖": {
         "class": RSIStrategy,
-        "params": {"rsi_period": (7, 28, 14), "oversold": (20, 40, 30),
-                    "overbought": (60, 80, 70), "trailing_stop": (1.0, 8.0, 3.0)},
+        "params": {"rsi_period": (7, 28, 14), "oversold": (20, 40, 35),
+                    "overbought": (60, 80, 65), "trailing_stop": (1.0, 8.0, 3.0)},
         "param_labels": {"rsi_period": "RSI 周期（天）", "oversold": "超卖线",
                          "overbought": "超买线", "trailing_stop": "跟踪止损（%）"},
         "desc": "RSI 低于超卖线买入，高于超买线或触发跟踪止损卖出。适合震荡行情。"
