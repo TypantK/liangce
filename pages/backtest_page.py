@@ -14,6 +14,92 @@ from core.engine import run_backtest
 from utils.chart import plot_backtest, render_strategy_card
 
 
+def _build_chart_html(fig):
+    """Generate HTML with embedded JS for click-to-zoom (mirrors test_click.html approach)."""
+    import uuid
+    chart_id = f"chart_{uuid.uuid4().hex[:8]}"
+
+    fig_html = fig.to_html(
+        include_plotlyjs='cdn',
+        full_html=False,
+        config={'doubleClick': False, 'displayModeBar': True, 'displaylogo': False},
+        div_id=chart_id,
+    )
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {{ margin: 0; padding: 0; background: #131520; }}
+        #{chart_id} {{ width: 100%; }}
+    </style>
+</head>
+<body>
+{fig_html}
+<script>
+(function() {{
+    var gd = document.getElementById('{chart_id}');
+    if (!gd) return;
+
+    function findDateIndex(allX, targetX) {{
+        var idx = -1, minDist = Infinity;
+        for (var i = 0; i < allX.length; i++) {{
+            var dist = Math.abs(new Date(allX[i]) - new Date(targetX));
+            if (dist < minDist) {{ minDist = dist; idx = i; }}
+        }}
+        return idx;
+    }}
+
+    function zoomToRange(gd, allX, startIdx, endIdx) {{
+        startIdx = Math.max(0, startIdx);
+        endIdx = Math.min(allX.length - 1, endIdx);
+        if (startIdx < endIdx) {{
+            Plotly.relayout(gd, {{'xaxis.range': [allX[startIdx], allX[endIdx]]}});
+        }}
+    }}
+
+    function initClickZoom() {{
+        gd.removeAllListeners('plotly_click');
+        gd.removeAllListeners('plotly_selected');
+
+        gd.on('plotly_click', function(data) {{
+            if (!data || !data.points || data.points.length === 0) return;
+            var pt = data.points[0];
+            var allX = pt.data.x;
+            if (!allX || allX.length === 0) return;
+            var idx = findDateIndex(allX, pt.x);
+            if (idx < 0) return;
+            zoomToRange(gd, allX, idx - 15, idx + 15);
+        }});
+
+        gd.on('plotly_selected', function(data) {{
+            if (!data || !data.range || !data.range.x) return;
+            var allX = data.points && data.points.length ? data.points[0].data.x : null;
+            if (!allX || allX.length === 0) {{
+                Plotly.relayout(gd, {{'xaxis.range': [data.range.x[0], data.range.x[1]]}});
+                return;
+            }}
+            var startIdx = findDateIndex(allX, data.range.x[0]);
+            var endIdx = findDateIndex(allX, data.range.x[1]);
+            if (startIdx >= 0 && endIdx >= 0) {{
+                zoomToRange(gd, allX, startIdx, endIdx);
+            }}
+        }});
+    }}
+
+    if (gd._fullLayout && gd._fullLayout._initialized) {{
+        initClickZoom();
+    }} else {{
+        gd.on('plotly_afterplot', function() {{ initClickZoom(); }});
+    }}
+}})();
+</script>
+</body>
+</html>"""
+    return html
+
+
 def render():
     st.title("策略回测")
 
@@ -42,7 +128,7 @@ def render():
 
     # ========== 回测 ==========
     if st.button("开始回测", type="primary", use_container_width=True):
-        st.session_state.zoom_range = None
+        st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
         with st.spinner("获取数据..."):
             if data_source == "演示数据":
                 data = generate_demo_data(300)
@@ -103,16 +189,7 @@ def render():
         key="price_slider",
     )
 
-    # ===== 重置缩放按钮 =====
-    xaxis_range = st.session_state.get("zoom_range", None)
-    if xaxis_range is not None:
-        zc1, zc2 = st.columns([1, 5])
-        with zc1:
-            if st.button("重置缩放", key="reset_zoom"):
-                st.session_state.zoom_range = None
-                st.rerun()
-
-    # ===== Plotly 交互式图表 =====
+    # ===== Plotly 交互式图表（JS 客户端缩放，对齐 test_click.html 方案） =====
     fig = plot_backtest(
         result["data"],
         result["strategy_name"],
@@ -121,46 +198,23 @@ def render():
         sell_points=result["sell_points"],
         trades=result["trades"],
         yaxis_range=(price_lo, price_hi),
-        xaxis_range=xaxis_range,
-    )
-    chart_event = st.plotly_chart(
-        fig, use_container_width=True,
-        key="kline_chart",
-        on_select="rerun",
-        selection_mode=["points"],
-        config={
-            'displayModeBar': True,
-            'displaylogo': False,
-            'doubleClick': False,
-        },
     )
 
-    st.caption("提示：点击任意 K 线（影线/实体均可）→ 放大到该日前后约一个月；工具栏「框选」可精确选择区间")
+    if "chart_version" not in st.session_state:
+        st.session_state.chart_version = 0
 
-    # ===== 处理点击/框选缩放 =====
-    if chart_event is not None:
-        if hasattr(chart_event, 'selection') and chart_event.selection and chart_event.selection.get("points"):
-            points = chart_event.selection["points"]
-            dates = sorted(set(pt.get("x") for pt in points if pt.get("x")))
-            if not dates:
-                st.rerun()
-            dti = pd.to_datetime(result["data"].index)
-            if len(dates) == 1:
-                # 单根 K 线点击 → 放大到 ±15 个交易日（约一个月）
-                target = pd.Timestamp(dates[0])
-                pos = np.abs((dti - target).days).argmin()
-                start = max(0, pos - 15)
-                end = min(len(dti) - 1, pos + 15)
-            else:
-                # 多根 K 线框选 → 精确范围
-                t0, t1 = pd.Timestamp(dates[0]), pd.Timestamp(dates[-1])
-                start = max(0, np.abs((dti - t0).days).argmin())
-                end = min(len(dti) - 1, np.abs((dti - t1).days).argmin())
-            st.session_state.zoom_range = (
-                dti[start].strftime('%Y-%m-%d'),
-                dti[end].strftime('%Y-%m-%d'),
-            )
-            st.rerun()
+    chart_html = _build_chart_html(fig)
+    st.components.v1.html(
+        chart_html, height=780,
+        key=f"kline_v{st.session_state.chart_version}",
+    )
+
+    st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 工具栏框选 → 精确区间 | 双击空白 → 重置缩放")
+
+    # ===== 重置缩放按钮 =====
+    if st.button("重置缩放", key="reset_zoom"):
+        st.session_state.chart_version += 1
+        st.rerun()
 
     # ===== 交易明细 =====
     if result["trades"]:
