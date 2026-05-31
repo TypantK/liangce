@@ -22,13 +22,22 @@ MA5_COLOR = '#f5a623'
 MA20_COLOR = '#4da6ff'
 CARD_BG   = '#1a1d2e'
 
+# ============ 浅色主题配色 ============
+LIGHT_BG        = '#ffffff'
+LIGHT_GRID_C    = '#e5e7eb'
+LIGHT_FG        = '#1f2937'
+LIGHT_FG_SOFT   = '#6b7280'
+LIGHT_CARD_BG   = '#f3f4f6'
+LIGHT_LINE_C    = '#d1d5db'
+
 # 中文字体栈：macOS 优先 PingFang SC，降级到跨平台字体
 CN_FONT = 'PingFang SC, Microsoft YaHei, SimHei, Arial Unicode MS, sans-serif'
 
 
 def plot_backtest(data, strategy_name, chart_mode="K线图",
                   buy_points=None, sell_points=None,
-                  trades=None, yaxis_range=None, xaxis_range=None):
+                  trades=None, yaxis_range=None, xaxis_range=None,
+                  theme="dark"):
     """
     生成 Plotly 交互式回测图表。
 
@@ -51,6 +60,30 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     df.index = pd.to_datetime(df.index)
     dti = df.index
     n = len(df)
+
+    # ---- 主题配色选择 ----
+    if theme == "light":
+        _bg      = LIGHT_BG
+        _grid_c  = LIGHT_GRID_C
+        _fg      = LIGHT_FG
+        _fg_soft = LIGHT_FG_SOFT
+        _card_bg = LIGHT_CARD_BG
+        _line_c  = LIGHT_LINE_C
+        _template = 'plotly_white'
+        _legend_bg = 'rgba(243,244,246,0.92)'
+        _rangeslider_bg = '#f3f4f6'
+        _inv_marker_color = 'rgba(0,0,0,0.01)'
+    else:
+        _bg      = BG
+        _grid_c  = GRID_C
+        _fg      = FG
+        _fg_soft = FG_SOFT
+        _card_bg = CARD_BG
+        _line_c  = '#2a2d3e'
+        _template = 'plotly_dark'
+        _legend_bg = 'rgba(26,29,46,0.92)'
+        _rangeslider_bg = '#1c1f2e'
+        _inv_marker_color = 'rgba(255,255,255,0.01)'
 
     # ---- 均线 ----
     ma5  = df['close'].rolling(5).mean()
@@ -167,7 +200,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         click_x_hi.append(dti[i]); click_y_hi.append(float(df['high'].iloc[i])); click_text_hi.append(t)
         click_x_lo.append(dti[i]); click_y_lo.append(float(df['low'].iloc[i]));  click_text_lo.append(t)
 
-    marker_opts = dict(size=40, opacity=0.01, color='rgba(255,255,255,0.01)')
+    marker_opts = dict(size=40, opacity=0.01, color=_inv_marker_color)
     fig.add_trace(go.Scatter(
         x=click_x_hi, y=click_y_hi, mode='markers', marker=marker_opts,
         hoverinfo='skip', showlegend=False, name='_click_cap_hi', text=click_text_hi,
@@ -213,8 +246,8 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
             text=buy_hover,
             hoverinfo='text',
             hoverlabel=dict(
-                bgcolor=CARD_BG, font=dict(color=FG, size=13, family=CN_FONT),
-                bordercolor='#2a2d3e',
+                bgcolor=_card_bg, font=dict(color=_fg, size=13, family=CN_FONT),
+                bordercolor=_line_c,
             ),
         ), row=1, col=1)
 
@@ -231,8 +264,8 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
             text=sell_hover,
             hoverinfo='text',
             hoverlabel=dict(
-                bgcolor=CARD_BG, font=dict(color=FG, size=13, family=CN_FONT),
-                bordercolor='#2a2d3e',
+                bgcolor=_card_bg, font=dict(color=_fg, size=13, family=CN_FONT),
+                bordercolor=_line_c,
             ),
         ), row=1, col=1)
 
@@ -247,14 +280,13 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     # ============ Layout ============
     title = f'<b>{strategy_name}</b> — {chart_type}'
     fig.update_layout(
-        # --- Dark template ---
-        template='plotly_dark',
-        paper_bgcolor=BG,
-        plot_bgcolor=BG,
-        font=dict(color=FG, size=11, family=CN_FONT),
+        template=_template,
+        paper_bgcolor=_bg,
+        plot_bgcolor=_bg,
+        font=dict(color=_fg, size=11, family=CN_FONT),
 
         # --- Title ---
-        title=dict(text=title, font=dict(color=FG, size=17, family=CN_FONT), x=0.01, xanchor='left'),
+        title=dict(text=title, font=dict(color=_fg, size=17, family=CN_FONT), x=0.01, xanchor='left'),
         height=700,
 
         # --- Hover ---
@@ -267,8 +299,8 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         showlegend=True,
         legend=dict(
             orientation='h', yanchor='top', y=1.06, xanchor='left', x=0.01,
-            bgcolor='rgba(26,29,46,0.92)', bordercolor=GRID_C, borderwidth=1,
-            font=dict(color=FG_SOFT, size=10, family=CN_FONT),
+            bgcolor=_legend_bg, bordercolor=_grid_c, borderwidth=1,
+            font=dict(color=_fg_soft, size=10, family=CN_FONT),
         ),
 
         # --- Margins ---
@@ -282,16 +314,16 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     # X axis — rangeslider 初始范围通过 xaxis.range 设，rangeslider 内部不硬编码 range，
     # 配合 autorange=False 避免拖动后回弹。
     fig.update_xaxes(
-        gridcolor=GRID_C, showgrid=True, zeroline=False,
-        linecolor='#2a2d3e', linewidth=1,
-        title_font=dict(color=FG_SOFT, family=CN_FONT),
+        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        linecolor=_line_c, linewidth=1,
+        title_font=dict(color=_fg_soft, family=CN_FONT),
         autorange=False,
         range=[default_x0, default_x1],
         rangeslider=dict(
             visible=True,
             thickness=0.06,
-            bgcolor='#1c1f2e',
-            bordercolor=GRID_C,
+            bgcolor=_rangeslider_bg,
+            bordercolor=_grid_c,
             borderwidth=1,
         ),
     )
@@ -299,24 +331,24 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     # Y axes
     fig.update_yaxes(
         title_text='价格 (¥)', row=1, col=1,
-        gridcolor=GRID_C, showgrid=True, zeroline=False,
-        linecolor='#2a2d3e', linewidth=1,
-        title_font=dict(color=FG_SOFT, size=10, family=CN_FONT),
+        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        linecolor=_line_c, linewidth=1,
+        title_font=dict(color=_fg_soft, size=10, family=CN_FONT),
         fixedrange=False,
         range=yaxis_range,
     )
     fig.update_yaxes(
         title_text='成交量', row=2, col=1,
-        gridcolor=GRID_C, showgrid=True, zeroline=False,
-        linecolor='#2a2d3e', linewidth=1,
-        title_font=dict(color=FG_SOFT, size=10, family=CN_FONT),
+        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        linecolor=_line_c, linewidth=1,
+        title_font=dict(color=_fg_soft, size=10, family=CN_FONT),
         fixedrange=False,
     )
 
     # X axis (shared, bottom)
     fig.update_xaxes(
         row=2, col=1,
-        gridcolor=GRID_C, showgrid=True,
+        gridcolor=_grid_c, showgrid=True,
     )
 
     # ---- 显式缩放：仅在点击 K 线触发缩放时覆盖横轴范围 ----

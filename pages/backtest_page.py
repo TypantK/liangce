@@ -14,15 +14,23 @@ from core.engine import run_backtest
 from utils.chart import plot_backtest, render_strategy_card
 
 
-def _build_chart_html(fig, version=0):
+def _build_chart_html(fig, version=0, theme="dark"):
     """Generate HTML with embedded JS for click-to-zoom (mirrors test_click.html approach)."""
     import uuid
     chart_id = f"chart_{uuid.uuid4().hex[:8]}"
 
+    # theme-aware background
+    if theme == "light":
+        _body_bg = '#ffffff'
+        _body_color = '#1f2937'
+    else:
+        _body_bg = '#131520'
+        _body_color = '#fff'
+
     fig_html = fig.to_html(
         include_plotlyjs='cdn',
         full_html=False,
-        config={'doubleClick': False, 'displayModeBar': True, 'displaylogo': False},
+        config={'doubleClick': 'reset', 'displayModeBar': True, 'displaylogo': False},
         div_id=chart_id,
     )
 
@@ -31,7 +39,7 @@ def _build_chart_html(fig, version=0):
 <head>
     <meta charset="utf-8">
     <style>
-        body {{ margin: 0; padding: 0; background: #131520; color: #fff; font-family: sans-serif; }}
+        body {{ margin: 0; padding: 0; background: {_body_bg}; color: {_body_color}; font-family: sans-serif; }}
         #{chart_id} {{ width: 100%; }}
         #_dbg {{ display: none; }}
     </style>
@@ -391,6 +399,10 @@ def _build_chart_html(fig, version=0):
 def render():
     st.title("策略回测")
 
+    # ========== 侧边栏：主题选择 ==========
+    theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
+    theme = "dark" if theme_label == "夜间" else "light"
+
     # ========== 控制面板 ==========
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
@@ -486,12 +498,13 @@ def render():
         sell_points=result["sell_points"],
         trades=result["trades"],
         yaxis_range=(price_lo, price_hi),
+        theme=theme,
     )
 
     if "chart_version" not in st.session_state:
         st.session_state.chart_version = 0
 
-    chart_html = _build_chart_html(fig, version=st.session_state.chart_version)
+    chart_html = _build_chart_html(fig, version=st.session_state.chart_version, theme=theme)
     st.components.v1.html(chart_html, height=780)
 
     st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 工具栏框选 → 精确区间 | 双击空白 → 重置缩放")
