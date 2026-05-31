@@ -253,27 +253,12 @@ def _build_chart_html(fig, version=0, theme="dark"):
                 if (isAutoscale) {{
                     vlog('RELAYOUT setting autorange=false');
                     Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
-                    // Auto zoomout after autoscale
-                    setTimeout(function() {{
-                        var xr = ((gd._fullLayout || {{}}).xaxis || {{}}).range;
-                        if (xr && xr[0] && xr[1]) {{
-                            var t0 = new Date(xr[0]).getTime();
-                            var t1 = new Date(xr[1]).getTime();
-                            var mid = (t0 + t1) / 2;
-                            var halfSpan = (t1 - t0) / 2 * 1.2;
-                            Plotly.relayout(gd, {{
-                                'xaxis.range': [new Date(mid - halfSpan).toISOString(), new Date(mid + halfSpan).toISOString()]
-                            }});
-                        }}
-                    }}, 50);
-                    setTimeout(function() {{
-                        dumpAutorangeState('after-disable-autorange');
-                        bindClickHandlers();
-                        var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
-                        vlog('RELAYOUT warm-up dragmode=' + cd);
-                        Plotly.relayout(gd, {{dragmode: cd}});
-                        setTimeout(function() {{ rebindLock = false; vlog('RELAYOUT unlock'); }}, 150);
-                    }}, 150);
+                    dumpAutorangeState('after-disable-autorange');
+                    bindClickHandlers();
+                    var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
+                    vlog('RELAYOUT warm-up dragmode=' + cd);
+                    Plotly.relayout(gd, {{dragmode: cd}});
+                    setTimeout(function() {{ rebindLock = false; vlog('RELAYOUT unlock'); }}, 150);
                 }} else {{
                     bindClickHandlers();
                     var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
@@ -366,22 +351,13 @@ def _build_chart_html(fig, version=0, theme="dark"):
             }}
         }} else if (key === 'e') {{
             e.preventDefault();
-            // 自包含 autoscale → autorange=false → zoomout 完整串联
+            // 模拟 modebar autoscale + zoomout 按钮，与手动点击行为完全一致
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
             setTimeout(function() {{
-                Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
-                setTimeout(function() {{
-                    var xr = ((gd._fullLayout || {{}}).xaxis || {{}}).range;
-                    if (xr && xr[0] && xr[1]) {{
-                        var t0 = new Date(xr[0]).getTime();
-                        var t1 = new Date(xr[1]).getTime();
-                        var mid = (t0 + t1) / 2;
-                        var halfSpan = (t1 - t0) / 2 * 1.2;
-                        Plotly.relayout(gd, {{
-                            'xaxis.range': [new Date(mid - halfSpan).toISOString(), new Date(mid + halfSpan).toISOString()]
-                        }});
-                    }}
-                }}, 60);
+                var zoomOutBtn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+                if (zoomOutBtn) {{
+                    zoomOutBtn.click();
+                }}
             }}, 150);
             if (dbg) {{
                 dbg.textContent = 'AUTOSCALE';
