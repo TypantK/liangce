@@ -90,11 +90,21 @@ def _make_logged_strategy(base_class, strategy_name):
                     'entry_reason': entry_reason, 'exit_reason': exit_reason,
                 })
     # 让 backtrader 在 sys.modules 中找到策略类的模块
-    import inspect
+    import inspect, importlib
     mod = inspect.getmodule(base_class)
-    if mod is not None:
-        LoggedStrategy.__module__ = mod.__name__
-        sys.modules[mod.__name__] = mod
+    target_module = mod.__name__ if mod is not None else getattr(base_class, '__module__', None)
+
+    if target_module is not None:
+        LoggedStrategy.__module__ = target_module
+        if mod is not None:
+            sys.modules[target_module] = mod
+        elif target_module not in sys.modules:
+            # Streamlit hot-reload 后模块可能丢失，尝试重新导入
+            try:
+                importlib.import_module(target_module)
+            except Exception:
+                pass
+
     return LoggedStrategy
 
 
