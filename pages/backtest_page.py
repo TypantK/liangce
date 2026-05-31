@@ -243,7 +243,10 @@ def _build_chart_html(fig, version=0):
         // Warm up
         var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
         vlog('setupZoom warm-up dragmode=' + currentDrag);
-        Plotly.relayout(gd, {{dragmode: currentDrag}});
+        // CRITICAL: Disable autorange on init. If autorange remains true,
+        // Plotly will NOT fire plotly_click events at all.
+        Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
+        dumpAutorangeState('after-init-disable');
         vlog('setupZoom DONE');
     }}
 
