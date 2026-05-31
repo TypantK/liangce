@@ -99,11 +99,15 @@ def _make_logged_strategy(base_class, strategy_name):
         if mod is not None:
             sys.modules[target_module] = mod
         elif target_module not in sys.modules:
-            # Streamlit hot-reload 后模块可能丢失，尝试重新导入
             try:
                 importlib.import_module(target_module)
             except Exception:
                 pass
+
+    # 最后防线：Streamlit hot-reload 可能导致目标模块始终不在 sys.modules，
+    # 回退到 backtrader（一定已导入，保证 backtrader 内部不报 KeyError）
+    if LoggedStrategy.__module__ not in sys.modules:
+        LoggedStrategy.__module__ = 'backtrader'
 
     return LoggedStrategy
 
