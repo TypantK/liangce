@@ -171,7 +171,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     fig.add_trace(go.Scatter(
         x=click_x, y=click_y,
         mode='markers',
-        marker=dict(size=8, opacity=0.35, color='rgba(180,185,210,0.35)',
+        marker=dict(size=8, opacity=0.55, color='rgba(100,180,255,0.55)',
                     line=dict(width=0)),
         hoverinfo='skip',
         showlegend=False,
