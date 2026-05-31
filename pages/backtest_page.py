@@ -33,9 +33,10 @@ def _build_chart_html(fig, version=0):
     <style>
         body {{ margin: 0; padding: 0; background: #131520; color: #fff; font-family: sans-serif; }}
         #{chart_id} {{ width: 100%; }}
-        #_dbg {{ position: fixed; top: 4px; right: 6px; padding: 3px 8px;
-                  background: rgba(255,255,255,0.1); border-radius: 4px;
-                  font-size: 11px; color: #888; z-index: 9999; pointer-events: none; }}
+        #_dbg {{ position: fixed; top: 4px; right: 6px; padding: 4px 10px;
+                  background: rgba(0,0,0,0.85); border-radius: 4px;
+                  font: 10px/1.4 monospace; color: #0f0; z-index: 9999;
+                  pointer-events: none; max-width: 640px; white-space: pre-wrap; }}
     </style>
 </head>
 <body>
@@ -67,9 +68,37 @@ def _build_chart_html(fig, version=0):
         _vLog.unshift(entry);
         if (_vLog.length > 40) _vLog.length = 40;
         console.log('[chart-d] ' + entry);
+        // Also show on screen
+        dbg.textContent = _vLog.slice(0, 15).join('\\n');
+        scheduleDump();
     }}
     function dumpLog() {{
         console.table(_vLog.map(function(s) {{ return {{entry:s}}; }}));
+    }}
+
+    // ─── DUMP TO FILE ───────────────────────────────────────────────
+    var _dumpUrl = 'http://127.0.0.1:19876/log';
+    var _dumpSeq = 0;
+    function dumpToFile() {{
+        _dumpSeq++;
+        var payload = JSON.stringify({{seq:_dumpSeq, time:new Date().toISOString(),
+            autorange: {{x:(gd._fullLayout||{{}}).xaxis||{{}}.autorange, y:(gd._fullLayout||{{}}).yaxis||{{}}.autorange}},
+            dragmode: (gd._fullLayout||{{}}).dragmode,
+            clickCount: clickCount,
+            log: _vLog}});
+        try {{
+            fetch(_dumpUrl, {{method:'POST', body:payload, headers:{{'Content-Type':'application/json'}}}})
+                .then(function(r){{ return r.text(); }})
+                .then(function(t){{ console.log('[chart] dump#'+_dumpSeq+' ok:', t); }})
+                .catch(function(e){{ console.log('[chart] dump#'+_dumpSeq+' err:', e.message); }});
+        }} catch(e) {{ console.log('[chart] dump fetch err:', e); }}
+    }}
+
+    // Auto-dump on every vlog (debounced 1s)
+    var _dumpTimer = null;
+    function scheduleDump() {{
+        if (_dumpTimer) clearTimeout(_dumpTimer);
+        _dumpTimer = setTimeout(dumpToFile, 1000);
     }}
     // ─── PLOTLY INTERNAL EVENT SPY ─────────────────────────────────────
     function spyPlotlyEvents() {{
@@ -253,6 +282,7 @@ def _build_chart_html(fig, version=0):
     window.__chartDebug = {{
         getLog: function() {{ return _vLog; }},
         dumpLog: dumpLog,
+        dumpToFile: dumpToFile,
         getGd: function() {{ return gd; }},
         dumpAutorange: function() {{ dumpAutorangeState('manual'); }},
         getClickCount: function() {{ return clickCount; }}
