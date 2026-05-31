@@ -14,7 +14,7 @@ from core.engine import run_backtest
 from utils.chart import plot_backtest, render_strategy_card
 
 
-def _build_chart_html(fig, version=0, theme="dark"):
+def _build_chart_html(fig, version=0, theme="dark", auto_zoom=False):
     """Generate HTML with embedded JS for click-to-zoom (mirrors test_click.html approach)."""
     import uuid
     chart_id = f"chart_{uuid.uuid4().hex[:8]}"
@@ -48,6 +48,7 @@ def _build_chart_html(fig, version=0, theme="dark"):
 <div id="_dbg">...</div>
 {fig_html}
 <script>
+window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 (function() {{
     var gd = null;
     var dbg = document.getElementById('_dbg');
@@ -279,6 +280,19 @@ def _build_chart_html(fig, version=0, theme="dark"):
         Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
         dumpAutorangeState('after-init-disable');
         vlog('setupZoom DONE');
+
+        if (window.__chartAutoZoom) {{
+            vlog('auto-zoom scheduled (500ms)');
+            setTimeout(function() {{
+                vlog('auto-zoom EXEC autorange=true');
+                Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+                setTimeout(function() {{
+                    var btn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+                    if (btn) {{ btn.click(); vlog('auto-zoom zoomout click OK'); }}
+                    else {{ vlog('auto-zoom zoomout btn missing'); }}
+                }}, 150);
+            }}, 500);
+        }}
     }}
 
     // --- Try multiple strategies to find the plot div and init ---
@@ -422,6 +436,7 @@ def render():
             )
 
         st.session_state.backtest_result = result
+        st.session_state.auto_zoom_pending = True
 
     # ========== 渲染结果 ==========
     if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
@@ -480,7 +495,11 @@ def render():
     if "chart_version" not in st.session_state:
         st.session_state.chart_version = 0
 
-    chart_html = _build_chart_html(fig, version=st.session_state.chart_version, theme=theme)
+    chart_html = _build_chart_html(
+        fig, version=st.session_state.chart_version, theme=theme,
+        auto_zoom=st.session_state.get("auto_zoom_pending", False),
+    )
+    st.session_state.auto_zoom_pending = False
     st.components.v1.html(chart_html, height=780)
 
     st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 工具栏框选 → 精确区间 | 双击空白 → 重置缩放")
