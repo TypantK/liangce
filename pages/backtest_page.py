@@ -33,10 +33,7 @@ def _build_chart_html(fig, version=0):
     <style>
         body {{ margin: 0; padding: 0; background: #131520; color: #fff; font-family: sans-serif; }}
         #{chart_id} {{ width: 100%; }}
-        #_dbg {{ position: fixed; top: 4px; right: 6px; padding: 4px 10px;
-                  background: rgba(0,0,0,0.85); border-radius: 4px;
-                  font: 10px/1.4 monospace; color: #0f0; z-index: 9999;
-                  pointer-events: none; max-width: 640px; white-space: pre-wrap; }}
+        #_dbg {{ display: none; }}
     </style>
 </head>
 <body>
@@ -143,7 +140,11 @@ def _build_chart_html(fig, version=0):
         startIdx = Math.max(0, startIdx);
         endIdx = Math.min(allX.length - 1, endIdx);
         if (startIdx < endIdx) {{
-            var relayoutObj = {{'xaxis.range': [allX[startIdx], allX[endIdx]]}};
+            var relayoutObj = {{
+                'xaxis.autorange': false,
+                'yaxis.autorange': false,
+                'xaxis.range': [allX[startIdx], allX[endIdx]]
+            }};
             // Y 轴同步 — 取 Candlestick trace 中区间内 high/low 极值
             var traces = gd.data;
             for (var t = 0; t < traces.length; t++) {{
