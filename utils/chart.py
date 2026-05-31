@@ -157,26 +157,22 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         hoverlabel=dict(font=dict(size=10)),
     ), row=1, col=1)
 
-    # ---- 散点层：捕获框选事件用于缩放 ----
-    # 每根 K 线在 low→high 之间生成 20 个均匀分布的标记点，
-    # 确保框选覆盖该 K 线的纵向区间时一定能命中 scatter 点
-    NUM_PTS_PER_CANDLE = 20
+    # ---- 点击捕获层：每根 K 线实体中点放一个半透明圆点 ----
+    # 用户点击圆点 → 自动放大到该日 ±15 个交易日（约一个月）
+    # 工具栏「框选」可精确选择多根 K 线区间
     click_x = []
     click_y = []
     click_text = []
     for i in range(n):
-        lo = float(df['low'].iloc[i])
-        hi = float(df['high'].iloc[i])
-        t = dti[i].strftime('%Y-%m-%d')
-        spacing = (hi - lo) / (NUM_PTS_PER_CANDLE - 1) if NUM_PTS_PER_CANDLE > 1 else 0
-        for j in range(NUM_PTS_PER_CANDLE):
-            click_x.append(dti[i])
-            click_y.append(lo + spacing * j)
-            click_text.append(t)
+        mid = (float(df['open'].iloc[i]) + float(df['close'].iloc[i])) / 2
+        click_x.append(dti[i])
+        click_y.append(mid)
+        click_text.append(dti[i].strftime('%Y-%m-%d'))
     fig.add_trace(go.Scatter(
         x=click_x, y=click_y,
         mode='markers',
-        marker=dict(size=12, opacity=0.01, color='rgba(255,255,255,0.01)'),
+        marker=dict(size=8, opacity=0.35, color='rgba(180,185,210,0.35)',
+                    line=dict(width=0)),
         hoverinfo='skip',
         showlegend=False,
         name='_click_capture',
@@ -284,7 +280,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         margin=dict(l=60, r=30, t=55, b=40),
 
         # --- Drag mode ---
-        dragmode='select',
+        dragmode='pan',
     )
 
     # X axis

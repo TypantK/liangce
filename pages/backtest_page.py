@@ -130,13 +130,13 @@ def render():
         selection_mode=["points"],
         config={
             'displayModeBar': True,
-            'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+            'modeBarButtonsToRemove': ['lasso2d'],
             'displaylogo': False,
             'doubleClick': False,
         },
     )
 
-    st.caption("提示：点击某根 K 线（轻微拖动即可选中）→ 自动放大到该日前后约一个月范围；拖拽多根 K 线 → 精确放大到所选区间")
+    st.caption("提示：点击 K 线实体上的圆点 → 放大到该日前后约一个月；工具栏「框选」可精确选择多根 K 线区间")
 
     # ===== 处理点击/框选缩放 =====
     if chart_event is not None:
