@@ -130,7 +130,6 @@ def render():
         selection_mode=["points"],
         config={
             'displayModeBar': True,
-            'modeBarButtonsToRemove': ['lasso2d'],
             'displaylogo': False,
             'doubleClick': False,
         },

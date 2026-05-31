@@ -260,9 +260,6 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         # --- Hover ---
         hovermode='closest',
 
-        # --- Click to zoom ---
-        clickmode='event+select',
-
         # --- 范围滑块：拖拽缩放时间轴，蜡烛宽度自适应变化 ---
         xaxis_rangeslider_thickness=0.06,
 
