@@ -149,14 +149,14 @@ def render():
             if len(dates) == 1:
                 # 单根 K 线点击 → 放大到 ±15 个交易日（约一个月）
                 target = pd.Timestamp(dates[0])
-                pos = (dti - target).abs().argmin()
+                pos = np.abs((dti - target).days).argmin()
                 start = max(0, pos - 15)
                 end = min(len(dti) - 1, pos + 15)
             else:
                 # 多根 K 线框选 → 精确范围
                 t0, t1 = pd.Timestamp(dates[0]), pd.Timestamp(dates[-1])
-                start = max(0, (dti - t0).abs().argmin())
-                end = min(len(dti) - 1, (dti - t1).abs().argmin())
+                start = max(0, np.abs((dti - t0).days).argmin())
+                end = min(len(dti) - 1, np.abs((dti - t1).days).argmin())
             st.session_state.zoom_range = (
                 dti[start].strftime('%Y-%m-%d'),
                 dti[end].strftime('%Y-%m-%d'),
