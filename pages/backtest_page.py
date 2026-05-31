@@ -14,7 +14,7 @@ from core.engine import run_backtest
 from utils.chart import plot_backtest, render_strategy_card
 
 
-def _build_chart_html(fig):
+def _build_chart_html(fig, version=0):
     """Generate HTML with embedded JS for click-to-zoom (mirrors test_click.html approach)."""
     import uuid
     chart_id = f"chart_{uuid.uuid4().hex[:8]}"
@@ -95,6 +95,7 @@ def _build_chart_html(fig):
     }}
 }})();
 </script>
+<!-- cv:{version} -->
 </body>
 </html>"""
     return html
@@ -203,11 +204,8 @@ def render():
     if "chart_version" not in st.session_state:
         st.session_state.chart_version = 0
 
-    chart_html = _build_chart_html(fig)
-    st.components.v1.html(
-        chart_html, height=780,
-        key=f"kline_v{st.session_state.chart_version}",
-    )
+    chart_html = _build_chart_html(fig, version=st.session_state.chart_version)
+    st.components.v1.html(chart_html, height=780)
 
     st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 工具栏框选 → 精确区间 | 双击空白 → 重置缩放")
 
