@@ -143,7 +143,25 @@ def _build_chart_html(fig, version=0):
         startIdx = Math.max(0, startIdx);
         endIdx = Math.min(allX.length - 1, endIdx);
         if (startIdx < endIdx) {{
-            Plotly.relayout(gd, {{'xaxis.range': [allX[startIdx], allX[endIdx]]}});
+            var relayoutObj = {{'xaxis.range': [allX[startIdx], allX[endIdx]]}};
+            // Y 轴同步 — 取 Candlestick trace 中区间内 high/low 极值
+            var traces = gd.data;
+            for (var t = 0; t < traces.length; t++) {{
+                var tr = traces[t];
+                if (tr.type === 'candlestick' && tr.high && tr.low) {{
+                    var yHi = -Infinity, yLo = Infinity;
+                    for (var i = startIdx; i <= endIdx; i++) {{
+                        if (tr.high[i] > yHi) yHi = tr.high[i];
+                        if (tr.low[i] < yLo) yLo = tr.low[i];
+                    }}
+                    if (yHi > yLo) {{
+                        var pad = (yHi - yLo) * 0.08;
+                        relayoutObj['yaxis.range'] = [yLo - pad, yHi + pad];
+                    }}
+                    break;
+                }}
+            }}
+            Plotly.relayout(gd, relayoutObj);
         }}
     }}
 
@@ -167,7 +185,7 @@ def _build_chart_html(fig, version=0):
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
             vlog('ZOOM from=' + idx + ' trace=' + traceName);
-            zoomToRange(allX, idx - 15, idx + 15);
+            zoomToRange(allX, idx - 30, idx + 30);
         }});
 
         gd.on('plotly_selected', function(data) {{
