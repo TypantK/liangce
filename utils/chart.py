@@ -280,7 +280,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         margin=dict(l=60, r=30, t=55, b=40),
 
         # --- Drag mode ---
-        dragmode='pan',
+        dragmode='select',
     )
 
     # X axis
