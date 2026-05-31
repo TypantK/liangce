@@ -111,6 +111,12 @@ def _build_chart_html(fig, version=0):
         }});
 
         log('ready');
+
+        // Warm up: re-assert dragmode to activate the drag/click event pipeline.
+        // Without this, the first click in pan mode is swallowed by Plotly's
+        // lazy-initialized drag layer. A no-op relayout forces it awake.
+        var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
+        Plotly.relayout(gd, {{dragmode: currentDrag}});
     }}
 
     // --- Try multiple strategies to find the plot div and init ---
