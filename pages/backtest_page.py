@@ -275,24 +275,23 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         // Warm up
         var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
         vlog('setupZoom warm-up dragmode=' + currentDrag);
-        // CRITICAL: Disable autorange on init. If autorange remains true,
-        // Plotly will NOT fire plotly_click events at all.
-        Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
-        dumpAutorangeState('after-init-disable');
-        vlog('setupZoom DONE');
 
         if (window.__chartAutoZoom) {{
-            vlog('auto-zoom scheduled (500ms)');
+            // 跳过 warm-up autorange=false，直接 autoscale+zoomout（与 E 键一致）
+            vlog('auto-zoom START (skip warm-up)');
+            Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
             setTimeout(function() {{
-                vlog('auto-zoom EXEC autorange=true');
-                Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
-                setTimeout(function() {{
-                    var btn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
-                    if (btn) {{ btn.click(); vlog('auto-zoom zoomout click OK'); }}
-                    else {{ vlog('auto-zoom zoomout btn missing'); }}
-                }}, 150);
-            }}, 500);
+                var btn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+                if (btn) {{ btn.click(); vlog('auto-zoom zoomout click OK'); }}
+                else {{ vlog('auto-zoom zoomout btn missing'); }}
+            }}, 150);
+        }} else {{
+            // CRITICAL: Disable autorange on init. If autorange remains true,
+            // Plotly will NOT fire plotly_click events at all.
+            Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
         }}
+        dumpAutorangeState('after-init-disable');
+        vlog('setupZoom DONE');
     }}
 
     // --- Try multiple strategies to find the plot div and init ---
