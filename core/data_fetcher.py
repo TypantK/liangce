@@ -88,6 +88,49 @@ def _try_open_stock_data(symbol: str, market: str, start: str, end: str) -> pd.D
     return df
 
 
+# ── baostock (直连，无需 token) ──────────────────────────────────────────
+
+def _try_baostock(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """A 股 via baostock 直连（纯 Python，无需 token 或翻墙）"""
+    import baostock as bs
+
+    # 转换代码：000001.SZ → sz.000001，600519.SH → sh.600519
+    if symbol.endswith('.SZ'):
+        bs_code = f"sz.{symbol.replace('.SZ', '')}"
+    elif symbol.endswith('.SH'):
+        bs_code = f"sh.{symbol.replace('.SH', '')}"
+    else:
+        raise ValueError(f"不支持的 A 股代码格式: {symbol}")
+
+    lg = bs.login()
+    if lg.error_code != '0':
+        raise RuntimeError(f"baostock 登录失败: {lg.error_msg}")
+
+    try:
+        rs = bs.query_history_k_data_plus(
+            bs_code,
+            'date,open,high,low,close,volume',
+            start_date=start,
+            end_date=end,
+            frequency='d',
+            adjustflag='3',  # 复权类型：3=后复权
+        )
+
+        data_list = []
+        if rs is not None:
+            while (rs.error_code == '0') and rs.next():
+                data_list.append(rs.get_row_data())
+
+        if not data_list:
+            raise RuntimeError(f"baostock 返回空数据: {rs.error_msg}")
+
+        df = pd.DataFrame(data_list, columns=rs.fields)
+        df = _normalize_columns(df)
+        return df
+    finally:
+        bs.logout()
+
+
 # ── akshare ───────────────────────────────────────────────────────────────
 
 def _try_akshare_cn(symbol: str, start: str, end: str) -> pd.DataFrame:
@@ -187,7 +230,8 @@ def get_stock_data(symbol: str, start: str = "2024-01-01", end: str = "2025-12-3
         raw = symbol.replace('.SZ', '').replace('.SH', '')
         chain = [
             ("open-stock-data", lambda: _try_open_stock_data(raw, market, start, end)),
-            ("akshare",          lambda: _try_akshare_cn(symbol, start, end)),
+            ("baostock",        lambda: _try_baostock(symbol, start, end)),
+            ("akshare",         lambda: _try_akshare_cn(symbol, start, end)),
         ]
 
     elif symbol.endswith('USDT'):
