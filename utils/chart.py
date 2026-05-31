@@ -157,26 +157,24 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         hoverlabel=dict(font=dict(size=10)),
     ), row=1, col=1)
 
-    # ---- 点击捕获层：每根 K 线实体中点放一个半透明圆点 ----
-    # 用户点击圆点 → 自动放大到该日 ±15 个交易日（约一个月）
-    # 工具栏「框选」可精确选择多根 K 线区间
-    click_x = []
-    click_y = []
-    click_text = []
+    # ---- 点击捕获层：每根 K 线 high 和 low 各放一个不可见大 marker ----
+    # 覆盖整根影线范围，确保点击蜡烛任意位置都能命中
+    # 参考 test_click.html 的方案：high/low 双排 marker + size 28
+    click_x_hi, click_y_hi, click_text_hi = [], [], []
+    click_x_lo, click_y_lo, click_text_lo = [], [], []
     for i in range(n):
-        mid = (float(df['open'].iloc[i]) + float(df['close'].iloc[i])) / 2
-        click_x.append(dti[i])
-        click_y.append(mid)
-        click_text.append(dti[i].strftime('%Y-%m-%d'))
+        t = dti[i].strftime('%Y-%m-%d')
+        click_x_hi.append(dti[i]); click_y_hi.append(float(df['high'].iloc[i])); click_text_hi.append(t)
+        click_x_lo.append(dti[i]); click_y_lo.append(float(df['low'].iloc[i]));  click_text_lo.append(t)
+
+    marker_opts = dict(size=28, opacity=0.01, color='rgba(255,255,255,0.01)')
     fig.add_trace(go.Scatter(
-        x=click_x, y=click_y,
-        mode='markers',
-        marker=dict(size=8, opacity=0.55, color='rgba(100,180,255,0.55)',
-                    line=dict(width=0)),
-        hoverinfo='skip',
-        showlegend=False,
-        name='_click_capture',
-        text=click_text,
+        x=click_x_hi, y=click_y_hi, mode='markers', marker=marker_opts,
+        hoverinfo='skip', showlegend=False, name='_click_cap_hi', text=click_text_hi,
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=click_x_lo, y=click_y_lo, mode='markers', marker=marker_opts,
+        hoverinfo='skip', showlegend=False, name='_click_cap_lo', text=click_text_lo,
     ), row=1, col=1)
 
     # MA5
@@ -280,7 +278,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         margin=dict(l=60, r=30, t=55, b=40),
 
         # --- Drag mode ---
-        dragmode='select',
+        dragmode='pan',
     )
 
     # X axis
