@@ -31,18 +31,27 @@ def _build_chart_html(fig, version=0):
 <head>
     <meta charset="utf-8">
     <style>
-        body {{ margin: 0; padding: 0; background: #131520; }}
+        body {{ margin: 0; padding: 0; background: #131520; color: #fff; font-family: sans-serif; }}
         #{chart_id} {{ width: 100%; }}
+        #_dbg {{ position: fixed; top: 4px; right: 6px; padding: 3px 8px;
+                  background: rgba(255,255,255,0.1); border-radius: 4px;
+                  font-size: 11px; color: #888; z-index: 9999; pointer-events: none; }}
     </style>
 </head>
 <body>
+<div id="_dbg">...</div>
 {fig_html}
 <script>
 (function() {{
-    var gd = document.getElementById('{chart_id}');
-    if (!gd) return;
+    var gd = null;
+    var dbg = document.getElementById('_dbg');
+    var clickCount = 0;
+    var zoomReady = false;
+
+    function log(msg) {{ dbg.textContent = msg; console.log('[chart]', msg); }}
 
     function findDateIndex(allX, targetX) {{
+        if (!allX || !allX.length) return -1;
         var idx = -1, minDist = Infinity;
         for (var i = 0; i < allX.length; i++) {{
             var dist = Math.abs(new Date(allX[i]) - new Date(targetX));
@@ -51,7 +60,8 @@ def _build_chart_html(fig, version=0):
         return idx;
     }}
 
-    function zoomToRange(gd, allX, startIdx, endIdx) {{
+    function zoomToRange(allX, startIdx, endIdx) {{
+        if (!gd) return;
         startIdx = Math.max(0, startIdx);
         endIdx = Math.min(allX.length - 1, endIdx);
         if (startIdx < endIdx) {{
@@ -59,40 +69,64 @@ def _build_chart_html(fig, version=0):
         }}
     }}
 
-    function initClickZoom() {{
+    function setupZoom() {{
+        if (zoomReady || !gd) return;
+        zoomReady = true;
+
+        // Remove old listeners to avoid duplicates
         gd.removeAllListeners('plotly_click');
-        gd.removeAllListeners('plotly_selected');
 
         gd.on('plotly_click', function(data) {{
-            if (!data || !data.points || data.points.length === 0) return;
+            clickCount++;
+            if (!data || !data.points || data.points.length === 0) {{
+                log('click#' + clickCount + ' no-pts');
+                return;
+            }}
             var pt = data.points[0];
             var allX = pt.data.x;
+            var traceName = (pt.data.name || pt.fullData || {{}}).name || '';
+            log('click#' + clickCount + ' trace=' + traceName + ' x=' + pt.x);
+
             if (!allX || allX.length === 0) return;
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
-            zoomToRange(gd, allX, idx - 15, idx + 15);
+            zoomToRange(allX, idx - 15, idx + 15);
+            log('zoom \u00b115');
         }});
 
-        gd.on('plotly_selected', function(data) {{
-            if (!data || !data.range || !data.range.x) return;
-            var allX = data.points && data.points.length ? data.points[0].data.x : null;
-            if (!allX || allX.length === 0) {{
-                Plotly.relayout(gd, {{'xaxis.range': [data.range.x[0], data.range.x[1]]}});
-                return;
-            }}
-            var startIdx = findDateIndex(allX, data.range.x[0]);
-            var endIdx = findDateIndex(allX, data.range.x[1]);
-            if (startIdx >= 0 && endIdx >= 0) {{
-                zoomToRange(gd, allX, startIdx, endIdx);
-            }}
-        }});
+        log('ready');
     }}
 
-    if (gd._fullLayout && gd._fullLayout._initialized) {{
-        initClickZoom();
-    }} else {{
-        gd.on('plotly_afterplot', function() {{ initClickZoom(); }});
+    // --- Try multiple strategies to find the plot div and init ---
+
+    function tryInit() {{
+        // Strategy 1: by ID
+        gd = document.getElementById('{chart_id}');
+        // Strategy 2: by class
+        if (!gd) gd = document.querySelector('.js-plotly-plot');
+        if (!gd) gd = document.querySelector('.plotly-graph-div');
+        if (!gd) gd = document.querySelector('[id^="chart_"]');
+
+        if (!gd) {{
+            log('no-div');
+            setTimeout(tryInit, 300);
+            return;
+        }}
+
+        if (gd._fullLayout && gd._fullLayout._initialized) {{
+            setupZoom();
+        }} else {{
+            gd.once && gd.once('plotly_afterplot', setupZoom);
+            gd.on('plotly_afterplot', setupZoom);
+            // Fallback: try after delay
+            setTimeout(function() {{
+                if (!zoomReady) setupZoom();
+            }}, 2000);
+        }}
     }}
+
+    // Small delay to let Plotly.newPlot start
+    setTimeout(tryInit, 200);
 }})();
 </script>
 <!-- cv:{version} -->
