@@ -317,6 +317,34 @@ def _build_chart_html(fig, version=0):
 }})();
 </script>
 <!-- cv:{version} -->
+<script>
+(function() {{
+    document.addEventListener('keydown', function(e) {{
+        // 仅在非输入元素焦点时生效，避免干扰 Streamlit 输入框
+        var tag = (document.activeElement || {{}}).tagName || '';
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+        var gd = window.__chartDebug && window.__chartDebug.getGd();
+        if (!gd) return;
+        var key = e.key.toLowerCase();
+        var dbg = document.getElementById('_dbg');
+        if (key === 'q') {{
+            e.preventDefault();
+            Plotly.relayout(gd, {{dragmode: 'zoom'}});
+            if (dbg) {{
+                dbg.textContent = 'Tool: ZOOM';
+                setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
+            }}
+        }} else if (key === 'w') {{
+            e.preventDefault();
+            Plotly.relayout(gd, {{dragmode: 'pan'}});
+            if (dbg) {{
+                dbg.textContent = 'Tool: PAN';
+                setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
+            }}
+        }}
+    }});
+}})();
+</script>
 </body>
 </html>"""
     return html
