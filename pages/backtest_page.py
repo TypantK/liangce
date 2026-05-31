@@ -69,11 +69,7 @@ def _build_chart_html(fig, version=0):
         }}
     }}
 
-    function setupZoom() {{
-        if (zoomReady || !gd) return;
-        zoomReady = true;
-
-        // Remove old listeners to avoid duplicates
+    function bindClickHandlers() {{
         gd.removeAllListeners('plotly_click');
 
         gd.on('plotly_click', function(data) {{
@@ -94,7 +90,6 @@ def _build_chart_html(fig, version=0):
             log('zoom \u00b115');
         }});
 
-        // Box-select handler
         gd.removeAllListeners('plotly_selected');
         gd.on('plotly_selected', function(data) {{
             if (!data || !data.range || !data.range.x) return;
