@@ -358,7 +358,23 @@ def _build_chart_html(fig, version=0):
             }}
         }} else if (key === 'e') {{
             e.preventDefault();
+            // 自包含 autoscale → autorange=false → zoomout 完整串联
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+            setTimeout(function() {{
+                Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
+                setTimeout(function() {{
+                    var xr = ((gd._fullLayout || {{}}).xaxis || {{}}).range;
+                    if (xr && xr[0] && xr[1]) {{
+                        var t0 = new Date(xr[0]).getTime();
+                        var t1 = new Date(xr[1]).getTime();
+                        var mid = (t0 + t1) / 2;
+                        var halfSpan = (t1 - t0) / 2 * 1.2;
+                        Plotly.relayout(gd, {{
+                            'xaxis.range': [new Date(mid - halfSpan).toISOString(), new Date(mid + halfSpan).toISOString()]
+                        }});
+                    }}
+                }}, 60);
+            }}, 150);
             if (dbg) {{
                 dbg.textContent = 'AUTOSCALE';
                 setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
