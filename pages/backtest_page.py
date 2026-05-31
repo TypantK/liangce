@@ -95,6 +95,7 @@ def _build_chart_html(fig, version=0):
         }});
 
         // Box-select handler
+        gd.removeAllListeners('plotly_selected');
         gd.on('plotly_selected', function(data) {{
             if (!data || !data.range || !data.range.x) return;
             if (!data.points || !data.points.length) {{
@@ -109,12 +110,28 @@ def _build_chart_html(fig, version=0):
                 zoomToRange(allX, startIdx, endIdx);
             }}
         }});
+    }}
+
+    function setupZoom() {{
+        if (zoomReady || !gd) return;
+        zoomReady = true;
+
+        bindClickHandlers();
+
+        // Re-bind after autoscale / zoom / rangeslider (relayout resets drag layer)
+        var rebindLock = false;
+        gd.on('plotly_relayout', function() {{
+            if (rebindLock) return;
+            rebindLock = true;
+            setTimeout(function() {{
+                bindClickHandlers();
+                rebindLock = false;
+            }}, 80);
+        }});
 
         log('ready');
 
         // Warm up: re-assert dragmode to activate the drag/click event pipeline.
-        // Without this, the first click in pan mode is swallowed by Plotly's
-        // lazy-initialized drag layer. A no-op relayout forces it awake.
         var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
         Plotly.relayout(gd, {{dragmode: currentDrag}});
     }}
