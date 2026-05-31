@@ -48,7 +48,51 @@ def _build_chart_html(fig, version=0):
     var clickCount = 0;
     var zoomReady = false;
 
-    function log(msg) {{ dbg.textContent = msg; console.log('[chart]', msg); }}
+    function log(msg) {{
+        dbg.textContent = msg;
+        console.log('[chart] ' + msg);
+    }}
+    // ─── VERBOSE DEBUG LOGGER ──────────────────────────────────────────
+    var _vLog = [];
+    function vlog(tag, payload) {{
+        var ts = new Date().toISOString().slice(11,23);
+        var entry = '[' + ts + '] ' + tag;
+        if (payload !== undefined) {{
+            try {{
+                entry += ' ' + JSON.stringify(payload).slice(0,500);
+            }} catch(e) {{
+                entry += ' ' + String(payload).slice(0,500);
+            }}
+        }}
+        _vLog.unshift(entry);
+        if (_vLog.length > 40) _vLog.length = 40;
+        console.log('[chart-d] ' + entry);
+    }}
+    function dumpLog() {{
+        console.table(_vLog.map(function(s) {{ return {{entry:s}}; }}));
+    }}
+    // ─── PLOTLY INTERNAL EVENT SPY ─────────────────────────────────────
+    function spyPlotlyEvents() {{
+        // Hook into Plotly's internal emit to catch ALL events
+        var origEmit = gd.emit;
+        var spyCount = 0;
+        gd.emit = function() {{
+            spyCount++;
+            var eventName = arguments[0];
+            if (eventName === 'plotly_click' || eventName === 'plotly_relayout' ||
+                eventName === 'plotly_doubleclick' || eventName === 'plotly_afterplot') {{
+                var hasPoints = '???';
+                if (eventName === 'plotly_click') {{
+                    try {{
+                        hasPoints = arguments[1] && arguments[1].points ? arguments[1].points.length : 0;
+                    }} catch(e) {{ hasPoints = 'err'; }}
+                }}
+                vlog('EMIT:' + eventName + ' pts=' + hasPoints);
+            }}
+            return origEmit.apply(this, arguments);
+        }};
+        vlog('spy-installed emit#calls=' + spyCount);
+    }}
 
     function findDateIndex(allX, targetX) {{
         if (!allX || !allX.length) return -1;
@@ -70,28 +114,30 @@ def _build_chart_html(fig, version=0):
     }}
 
     function bindClickHandlers() {{
+        vlog('bindClickHandlers BEGIN');
         gd.removeAllListeners('plotly_click');
+        gd.removeAllListeners('plotly_selected');
+
+        // Also remove any leftover internal listeners that may block
+        gd.removeAllListeners('plotly_doubleclick');
 
         gd.on('plotly_click', function(data) {{
             clickCount++;
-            if (!data || !data.points || data.points.length === 0) {{
-                log('click#' + clickCount + ' no-pts');
-                return;
-            }}
+            var pts = (data && data.points) ? data.points.length : 0;
+            vlog('CLICK#' + clickCount + ' pts=' + pts + ' event=' + (data ? data.event : '?'));
+            if (!pts) return;
             var pt = data.points[0];
             var allX = pt.data.x;
             var traceName = (pt.data.name || pt.fullData || {{}}).name || '';
-            log('click#' + clickCount + ' trace=' + traceName + ' x=' + pt.x);
-
             if (!allX || allX.length === 0) return;
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
+            vlog('ZOOM from=' + idx + ' trace=' + traceName);
             zoomToRange(allX, idx - 15, idx + 15);
-            log('zoom \u00b115');
         }});
 
-        gd.removeAllListeners('plotly_selected');
         gd.on('plotly_selected', function(data) {{
+            vlog('SELECT range=' + (data && data.range ? JSON.stringify(data.range) : 'null'));
             if (!data || !data.range || !data.range.x) return;
             if (!data.points || !data.points.length) {{
                 Plotly.relayout(gd, {{'xaxis.range': [data.range.x[0], data.range.x[1]]}});
@@ -105,34 +151,71 @@ def _build_chart_html(fig, version=0):
                 zoomToRange(allX, startIdx, endIdx);
             }}
         }});
+
+        vlog('bindClickHandlers DONE');
+    }}
+
+    function dumpAutorangeState(tag) {{
+        try {{
+            var la = gd._fullLayout || {{}};
+            var xa = la.xaxis || {{}};
+            var ya = la.yaxis || {{}};
+            vlog('AUTORANGE:' + tag + ' x=' + xa.autorange + ' y=' + ya.autorange +
+                 ' dm=' + la.dragmode + ' xrange=' + JSON.stringify(xa.range).slice(0,80));
+        }} catch(e) {{ vlog('AUTORANGE:' + tag + ' err'); }}
     }}
 
     function setupZoom() {{
-        if (zoomReady || !gd) return;
+        if (zoomReady || !gd) {{ vlog('setupZoom skip ready=' + zoomReady + ' gd=' + !!gd); return; }}
         zoomReady = true;
+        vlog('setupZoom START');
 
+        spyPlotlyEvents();
         bindClickHandlers();
+        dumpAutorangeState('initial');
 
         // Re-bind after autoscale / zoom / rangeslider (relayout resets drag layer)
         var rebindLock = false;
-        gd.on('plotly_relayout', function() {{
-            if (rebindLock) return;
+        gd.on('plotly_relayout', function(eventData) {{
+            var edKeys = Object.keys(eventData || {{}}).join(',');
+            vlog('RELAYOUT keys=[' + edKeys + '] lock=' + rebindLock);
+            dumpAutorangeState('relayout-before-handle');
+            if (rebindLock) {{ vlog('RELAYOUT skip (locked)'); return; }}
             rebindLock = true;
+
+            var isAutoscale = eventData && ('xaxis.autorange' in eventData || 'yaxis.autorange' in eventData);
+            var delay = isAutoscale ? 300 : 80;
+            vlog('RELAYOUT isAutoscale=' + isAutoscale + ' delay=' + delay);
+
             setTimeout(function() {{
-                bindClickHandlers();
-                // Warm up the drag pipeline after rebind (autoscale kills it)
-                var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
-                Plotly.relayout(gd, {{dragmode: cd}});
-                // rebindLock stays true, preventing re-entry from the warm-up relayout
-                setTimeout(function() {{ rebindLock = false; }}, 150);
-            }}, 80);
+                if (isAutoscale) {{
+                    vlog('RELAYOUT setting autorange=false');
+                    Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
+                    setTimeout(function() {{
+                        dumpAutorangeState('after-disable-autorange');
+                        bindClickHandlers();
+                        var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
+                        vlog('RELAYOUT warm-up dragmode=' + cd);
+                        Plotly.relayout(gd, {{dragmode: cd}});
+                        setTimeout(function() {{ rebindLock = false; vlog('RELAYOUT unlock'); }}, 150);
+                    }}, 150);
+                }} else {{
+                    bindClickHandlers();
+                    var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
+                    vlog('RELAYOUT warm-up dragmode=' + cd);
+                    Plotly.relayout(gd, {{dragmode: cd}});
+                    setTimeout(function() {{ rebindLock = false; vlog('RELAYOUT unlock'); }}, 150);
+                }}
+            }}, delay);
         }});
 
         log('ready');
 
-        // Warm up: re-assert dragmode to activate the drag/click event pipeline.
+        // Warm up
         var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
+        vlog('setupZoom warm-up dragmode=' + currentDrag);
         Plotly.relayout(gd, {{dragmode: currentDrag}});
+        vlog('setupZoom DONE');
     }}
 
     // --- Try multiple strategies to find the plot div and init ---
@@ -165,6 +248,16 @@ def _build_chart_html(fig, version=0):
 
     // Small delay to let Plotly.newPlot start
     setTimeout(tryInit, 200);
+
+    // ─── EXPORT DEBUG API ──────────────────────────────────────────
+    window.__chartDebug = {{
+        getLog: function() {{ return _vLog; }},
+        dumpLog: dumpLog,
+        getGd: function() {{ return gd; }},
+        dumpAutorange: function() {{ dumpAutorangeState('manual'); }},
+        getClickCount: function() {{ return clickCount; }}
+    }};
+    console.log('[chart] Debug API at window.__chartDebug');
 }})();
 </script>
 <!-- cv:{version} -->
