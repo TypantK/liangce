@@ -163,8 +163,10 @@ def run_backtest(data, strategy_class, strategy_params,
     trade_log = getattr(strat, '_trade_log', [])
     trades, buy_pts, sell_pts = [], [], []
 
+    max_idx = len(data) - 1
     for tl in trade_log:
-        bi, si = tl['baropen'], tl['barclose']
+        bi = min(tl['baropen'], max_idx)
+        si = min(tl['barclose'], max_idx)
         buy_pts.append((bi, tl['entry']))
         sell_pts.append((si, tl['exit']))
         trades.append({
