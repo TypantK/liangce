@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-策略回测页面 v3 — Plotly 交互式图表 + 基金净值浏览 + 智能拼音搜索
+策略回测页面 v4 — 统一数据源选择器 + 智能拼音搜索 + 自动判断图表类型
 """
 
 import sys, os
@@ -23,48 +23,68 @@ try:
 except ImportError:
     _PY_AVAIL = False
 
+# 基金原始数据
+_FUNDS_RAW = [
+    ("011172", "广发利鑫混合C"),
+    ("000001", "华夏成长混合"),
+    ("001933", "华商新兴活力混合"),
+    ("005827", "易方达蓝筹精选混合"),
+    ("161725", "招商中证白酒指数(LOF)A"),
+    ("270002", "广发稳健增长混合A"),
+    ("110011", "易方达中小盘混合"),
+    ("002001", "华夏回报混合A"),
+    ("519674", "银河创新成长混合A"),
+    ("163406", "兴全合润混合(LOF)"),
+    ("320007", "诺安成长混合"),
+    ("000083", "汇添富消费行业混合"),
+]
 
-def _make_fund_pool():
-    """构建带拼音的基金池"""
-    funds_raw = [
-        ("011172", "广发利鑫混合C"),
-        ("000001", "华夏成长混合"),
-        ("001933", "华商新兴活力混合"),
-        ("005827", "易方达蓝筹精选混合"),
-        ("161725", "招商中证白酒指数(LOF)A"),
-        ("270002", "广发稳健增长混合A"),
-        ("110011", "易方达中小盘混合"),
-        ("002001", "华夏回报混合A"),
-        ("519674", "银河创新成长混合A"),
-        ("163406", "兴全合润混合(LOF)"),
-        ("320007", "诺安成长混合"),
-        ("000083", "汇添富消费行业混合"),
-    ]
+
+def _make_pinyin(name):
+    """生成拼音全拼和首字母"""
+    if _PY_AVAIL:
+        py = ''.join(lazy_pinyin(name))
+        pyf = ''.join([p[0] for p in lazy_pinyin(name)])
+    else:
+        py = name.lower()
+        pyf = ''.join([w[0] for w in name])
+    return py, pyf
+
+
+def _make_unified_pool():
+    """构建统一数据池：演示数据 + 股票 + 基金"""
     pool = []
-    for code, name in funds_raw:
-        if _PY_AVAIL:
-            py = ''.join(lazy_pinyin(name))
-            pyf = ''.join([p[0] for p in lazy_pinyin(name)])
-        else:
-            py = name.lower()
-            pyf = ''.join([w[0] for w in name])
-        pool.append({"code": code, "name": name, "pinyin": py, "pinyin_first": pyf})
+    # 演示数据（始终第一位）
+    py, pyf = _make_pinyin("演示数据")
+    pool.append({"type": "demo", "code": "", "name": "演示数据",
+                 "pinyin": py, "pinyin_first": pyf})
+    # 股票
+    for name, code in STOCK_POOL.items():
+        py, pyf = _make_pinyin(name)
+        pool.append({"type": "stock", "code": code, "name": name,
+                     "pinyin": py, "pinyin_first": pyf})
+    # 基金
+    for code, name in _FUNDS_RAW:
+        py, pyf = _make_pinyin(name)
+        pool.append({"type": "fund", "code": code, "name": name,
+                     "pinyin": py, "pinyin_first": pyf})
     return pool
 
 
-FUND_POOL = _make_fund_pool()
+UNIFIED_POOL = _make_unified_pool()
+TYPE_TAGS = {"demo": "演示", "stock": "股票", "fund": "基金"}
 
 
-def search_funds(query):
-    """拼音/中文/代码智能搜索"""
+def search_data_source(query):
+    """统一搜索：拼音/中文/代码，匹配所有数据源"""
     if not query or not query.strip():
-        return FUND_POOL
+        return UNIFIED_POOL
     q = query.strip().lower()
     results = []
-    for f in FUND_POOL:
-        if (q in f["code"] or q in f["name"].lower() or
-                q in f["pinyin"] or q in f["pinyin_first"]):
-            results.append(f)
+    for item in UNIFIED_POOL:
+        if (q in item["code"].lower() or q in item["name"].lower() or
+                q in item["pinyin"] or q in item["pinyin_first"]):
+            results.append(item)
     return results
 
 
@@ -414,228 +434,65 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 def render():
     st.title("策略回测")
 
-    # ========== 侧边栏 ==========
+    # ========== 侧边栏：主题 ==========
     theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
     theme = "dark" if theme_label == "夜间" else "light"
 
-    data_type = st.sidebar.radio("数据类型", ["股票回测", "基金浏览"], key="data_type")
-
-    # ================================================================
-    #  模式 1：股票回测（保持全部原有逻辑）
-    # ================================================================
-    if data_type == "股票回测":
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
-        with c2:
-            data_source = st.selectbox("数据源", ["演示数据"] + list(STOCK_POOL.keys()), key="d")
-
-        c4, c5 = st.columns([1, 1])
-        with c4:
-            backtest_start = st.date_input(
-                "回测起始日期",
-                value=datetime.now() - timedelta(days=365),
-                min_value=datetime(2000, 1, 1),
-                max_value=datetime.now(),
-                key="bs_start",
-            )
-        with c5:
-            backtest_end = st.date_input(
-                "回测结束日期",
-                value=datetime.now(),
-                min_value=datetime(2000, 1, 1),
-                max_value=datetime.now(),
-                key="bs_end",
-            )
-
-        initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
-
-        strat_info = STRATEGY_REGISTRY[strategy_name]
-        st.caption(strat_info["desc"])
-
-        params = {}
-        labels = strat_info.get("param_labels", {})
-        pcols = st.columns(len(strat_info["params"]))
-        for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
-            with pcols[i]:
-                step = 0.1 if isinstance(pdef, float) else 1
-                label = labels.get(pn, pn)
-                params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
-
-        # ===== 回测按钮 =====
-        if st.button("开始回测", type="primary", use_container_width=True):
-            st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
-            with st.spinner("获取数据..."):
-                if data_source == "演示数据":
-                    data = generate_demo_data(300)
-                else:
-                    data = get_stock_data(STOCK_POOL[data_source])
-                    if data is None or data.empty:
-                        st.error(f"获取 {data_source} 数据失败，请检查网络")
-                        return
-
-                if data_source != "演示数据":
-                    first_date = data.index[0].strftime('%Y-%m-%d')
-                    last_date = data.index[-1].strftime('%Y-%m-%d')
-                    st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
-
-                start_dt = pd.Timestamp(backtest_start)
-                end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
-                data = data[(data.index >= start_dt) & (data.index < end_dt)]
-                if data.empty:
-                    st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
-                    return
-
-            with st.spinner(f"运行「{strategy_name}」..."):
-                result = run_backtest(
-                    data, strat_info["class"], params,
-                    initial_cash=initial_cash,
-                    strategy_name=strategy_name,
-                )
-
-            st.session_state.backtest_result = result
-            st.session_state.auto_zoom_pending = True
-            st.session_state.full_data = data
-            st.session_state.bp_params = params
-            st.session_state.bp_strat_class = strat_info["class"]
-            st.session_state.bp_strat_name = strategy_name
-            st.session_state.bp_cash = initial_cash
-
-        # ===== 渲染回测结果 =====
-        if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
-            st.info("点击「开始回测」查看结果")
-            return
-
-        result = st.session_state.backtest_result
-        st.divider()
-
-        m = result["metrics"]
-        mn1, mn2, mn3 = st.columns(3)
-        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        mn2.metric("最大回撤", m["最大回撤"])
-        mn3.metric("夏普比率", m["夏普比率"])
-        mn4, mn5, mn6 = st.columns(3)
-        mn4.metric("胜率", m["胜率"])
-        mn5.metric("交易次数", m["交易次数"])
-        mn6.metric("最终资金", m["最终资金"])
-
-        st.divider()
-
-        explanation = result.get("explanation", {})
-        if explanation:
-            with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
-                st.markdown(render_strategy_card(strategy_name, explanation))
-
-        full_high = float(result["data"]["high"].max())
-        full_low = float(result["data"]["low"].min())
-        pad = (full_high - full_low) * 0.15
-        price_lo, price_hi = st.slider(
-            "纵轴（价格）范围",
-            min_value=float(int(full_low - pad)),
-            max_value=float(int(full_high + pad) + 1),
-            value=(full_low, full_high),
-            step=0.5,
-            key="price_slider",
-        )
-
-        # 自动判断：有 OHLC → K 线
-        chart_mode = "K线图"
-
-        fig = plot_backtest(
-            result["data"], result["strategy_name"],
-            chart_mode=chart_mode,
-            buy_points=result["buy_points"],
-            sell_points=result["sell_points"],
-            trades=result["trades"],
-            yaxis_range=(price_lo, price_hi),
-            theme=theme,
-        )
-
-        if "chart_version" not in st.session_state:
-            st.session_state.chart_version = 0
-
-        chart_html = _build_chart_html(
-            fig, version=st.session_state.chart_version, theme=theme,
-            auto_zoom=st.session_state.get("auto_zoom_pending", False),
-        )
-        st.session_state.auto_zoom_pending = False
-        st.components.v1.html(chart_html, height=780)
-
-        st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 双击空白 → 重置缩放 | Q=缩放 W=平移 E=全览")
-
-        if st.button("重置缩放", key="reset_zoom"):
-            st.session_state.chart_version += 1
-            st.rerun()
-
-        if result["trades"]:
-            st.subheader("交易明细")
-            trade_df = pd.DataFrame(result["trades"])
-            display_cols = [c for c in
-                            ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
-                            if c in trade_df.columns]
-            st.dataframe(
-                trade_df[display_cols],
-                use_container_width=True, hide_index=True,
-                column_config={
-                    "买入价": st.column_config.NumberColumn(format="¥%.2f"),
-                    "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
-                }
-            )
-        else:
-            st.info("本次回测期间无交易记录")
-        return
-
-    # ================================================================
-    #  模式 2：基金浏览
-    # ================================================================
-    st.subheader("基金净值浏览")
-
-    # ---- 基金搜索 ----
+    # ========== 统一数据源搜索 & 选择 ==========
     search_query = st.text_input(
-        "搜索基金（名称/代码/拼音）",
-        placeholder="例如：广发、011172、gflx、yfdl...",
-        key="fund_search",
+        "搜索数据源（名称 / 代码 / 拼音）",
+        placeholder="例如：茅台、011172、gflx、比亚迪、演示...",
+        key="unified_search",
     )
-    candidates = search_funds(search_query)
+    candidates = search_data_source(search_query)
 
     if not candidates:
-        st.warning("无匹配基金")
+        st.warning("无匹配数据源")
         return
 
-    # 构建 selectbox 选项
-    candidate_labels = [f"{f['name']} ({f['code']})" for f in candidates]
-    # 默认选中第一个（广发利鑫 011172）
+    # 构建带类型标签的选择列表
+    candidate_labels = []
+    for it in candidates:
+        tag = TYPE_TAGS.get(it["type"], "?")
+        if it["code"]:
+            candidate_labels.append(f"{it['name']}  [{tag}]  {it['code']}")
+        else:
+            candidate_labels.append(f"{it['name']}  [{tag}]")
+
+    # 默认选中演示数据
     default_idx = 0
-    for i, f in enumerate(candidates):
-        if f["code"] == "011172":
+    for i, it in enumerate(candidates):
+        if it["type"] == "demo":
             default_idx = i
             break
-    selected_label = st.selectbox(
-        "选择基金",
-        candidate_labels,
-        index=default_idx,
-        key="fund_select",
-    )
 
+    selected_label = st.selectbox("数据源", candidate_labels, index=default_idx, key="ds_select")
     selected_idx = candidate_labels.index(selected_label)
-    fund = candidates[selected_idx]
+    item = candidates[selected_idx]
 
-    # ---- 侧边栏基金信息 ----
+    # ========== 按类型分支 ==========
+    if item["type"] == "fund":
+        _render_fund(item, theme)
+    else:
+        _render_backtest(item, theme)
+
+
+# ============================================================
+#  _render_fund  — 基金净值折线图
+# ============================================================
+def _render_fund(item, theme):
+    """选中基金 → 获取净值 → 红色折线图"""
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"""
-**基金名称**: {fund['name']}  
-**基金代码**: {fund['code']}  
-""")
+    st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
 
-    # ---- 获取净值数据 ----
-    if "fund_data" not in st.session_state or st.session_state.get("fund_code") != fund["code"]:
-        with st.spinner(f"获取 {fund['name']} ({fund['code']}) 净值数据..."):
-            nav_df = get_fund_nav(fund["code"])
+    if "fund_data" not in st.session_state or st.session_state.get("fund_code") != item["code"]:
+        with st.spinner(f"获取 {item['name']} ({item['code']}) 净值数据..."):
+            nav_df = get_fund_nav(item["code"])
         if nav_df is None or nav_df.empty:
-            st.error(f"获取 {fund['name']} 净值数据失败，请检查网络或代码是否正确")
+            st.error(f"获取 {item['name']} 净值数据失败")
             return
         st.session_state.fund_data = nav_df
-        st.session_state.fund_code = fund["code"]
+        st.session_state.fund_code = item["code"]
         st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
 
     nav_df = st.session_state.fund_data
@@ -645,14 +502,12 @@ def render():
     date_start = nav_df["date"].iloc[0].strftime('%Y-%m-%d')
     date_end = nav_df["date"].iloc[-1].strftime('%Y-%m-%d')
 
-    # ---- 指标 ----
     mc1, mc2, mc3, mc4 = st.columns(4)
     mc1.metric("最新净值", f"{latest_nav:.4f}")
     mc2.metric("成立以来", f"{total_return:+.1f}%")
     mc3.metric("数据范围", f"{date_start} ~ {date_end}")
     mc4.metric("交易日数", str(len(nav_df)))
 
-    # ---- 净值折线图 ----
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=nav_df["date"], y=nav_df["nav"],
@@ -665,26 +520,20 @@ def render():
         paper_bgcolor=BG, plot_bgcolor=BG,
         font=dict(color=FG, size=11, family=CN_FONT),
         title=dict(
-            text=f"<b>{fund['name']} ({fund['code']})</b> — 单位净值走势",
+            text=f"<b>{item['name']} ({item['code']})</b> — 单位净值走势",
             font=dict(color=FG, size=17, family=CN_FONT),
             x=0.01, xanchor='left',
         ),
-        height=650,
-        hovermode='closest',
-        showlegend=False,
+        height=650, hovermode='closest', showlegend=False,
         margin=dict(l=60, r=30, t=55, b=40),
-        dragmode='pan',
-        clickmode='event',
+        dragmode='pan', clickmode='event',
     )
     fig.update_xaxes(
         gridcolor=GRID_C, showgrid=True, zeroline=False,
-        linecolor=LINE_C, linewidth=1,
-        autorange=False,
+        linecolor=LINE_C, linewidth=1, autorange=False,
         title_font=dict(color=FG_SOFT, family=CN_FONT),
-        rangeslider=dict(
-            visible=True, thickness=0.06,
-            bgcolor='#1c1f2e', bordercolor=GRID_C, borderwidth=1,
-        ),
+        rangeslider=dict(visible=True, thickness=0.06,
+                         bgcolor='#1c1f2e', bordercolor=GRID_C, borderwidth=1),
     )
     fig.update_yaxes(
         title_text='单位净值 (元)',
@@ -697,13 +546,159 @@ def render():
     if "fund_chart_version" not in st.session_state:
         st.session_state.fund_chart_version = 0
 
-    chart_html = _build_chart_html(
-        fig, version=st.session_state.fund_chart_version, theme=theme,
-    )
+    chart_html = _build_chart_html(fig, version=st.session_state.fund_chart_version, theme=theme)
     st.components.v1.html(chart_html, height=730)
-
-    st.caption("提示：点击折线 → 放大前后约 60 个数据点 | 双击空白 → 重置缩放 | Q=缩放 W=平移 E=全览")
+    st.caption("Q=缩放  W=平移  E=全览 | 点击折线放大 | 双击重置")
 
     if st.button("重置缩放", key="fund_reset_zoom"):
         st.session_state.fund_chart_version += 1
         st.rerun()
+
+
+# ============================================================
+#  _render_backtest  — 股票回测（演示 / 真实）
+# ============================================================
+def _render_backtest(item, theme):
+    """选中股票/演示 → 策略回测 → K 线"""
+    is_demo = item["type"] == "demo"
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
+    with c2:
+        if is_demo:
+            st.info("📊 演示数据（模拟走势）")
+        else:
+            st.info(f"📈 {item['name']}  ({item['code']})")
+
+    c4, c5 = st.columns([1, 1])
+    with c4:
+        backtest_start = st.date_input(
+            "回测起始日期", value=datetime.now() - timedelta(days=365),
+            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_start",
+        )
+    with c5:
+        backtest_end = st.date_input(
+            "回测结束日期", value=datetime.now(),
+            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_end",
+        )
+
+    initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
+
+    strat_info = STRATEGY_REGISTRY[strategy_name]
+    st.caption(strat_info["desc"])
+
+    params = {}
+    labels = strat_info.get("param_labels", {})
+    pcols = st.columns(len(strat_info["params"]))
+    for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
+        with pcols[i]:
+            step = 0.1 if isinstance(pdef, float) else 1
+            label = labels.get(pn, pn)
+            params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+
+    if st.button("开始回测", type="primary", use_container_width=True):
+        st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
+        with st.spinner("获取数据..."):
+            if is_demo:
+                data = generate_demo_data(300)
+            else:
+                data = get_stock_data(item["code"])
+                if data is None or data.empty:
+                    st.error(f"获取 {item['name']} 数据失败")
+                    return
+
+            if not is_demo:
+                first_date = data.index[0].strftime('%Y-%m-%d')
+                last_date = data.index[-1].strftime('%Y-%m-%d')
+                st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+
+            start_dt = pd.Timestamp(backtest_start)
+            end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
+            data = data[(data.index >= start_dt) & (data.index < end_dt)]
+            if data.empty:
+                st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
+                return
+
+        with st.spinner(f"运行「{strategy_name}」..."):
+            result = run_backtest(data, strat_info["class"], params,
+                                  initial_cash=initial_cash, strategy_name=strategy_name)
+
+        st.session_state.backtest_result = result
+        st.session_state.auto_zoom_pending = True
+        st.session_state.full_data = data
+        st.session_state.bp_params = params
+        st.session_state.bp_strat_class = strat_info["class"]
+        st.session_state.bp_strat_name = strategy_name
+        st.session_state.bp_cash = initial_cash
+
+    if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
+        st.info("点击「开始回测」查看结果")
+        return
+
+    result = st.session_state.backtest_result
+    st.divider()
+
+    m = result["metrics"]
+    mn1, mn2, mn3 = st.columns(3)
+    mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    mn2.metric("最大回撤", m["最大回撤"])
+    mn3.metric("夏普比率", m["夏普比率"])
+    mn4, mn5, mn6 = st.columns(3)
+    mn4.metric("胜率", m["胜率"])
+    mn5.metric("交易次数", m["交易次数"])
+    mn6.metric("最终资金", m["最终资金"])
+
+    st.divider()
+
+    explanation = result.get("explanation", {})
+    if explanation:
+        with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
+            st.markdown(render_strategy_card(strategy_name, explanation))
+
+    full_high = float(result["data"]["high"].max())
+    full_low = float(result["data"]["low"].min())
+    pad = (full_high - full_low) * 0.15
+    price_lo, price_hi = st.slider(
+        "纵轴（价格）范围",
+        min_value=float(int(full_low - pad)),
+        max_value=float(int(full_high + pad) + 1),
+        value=(full_low, full_high), step=0.5, key="price_slider",
+    )
+
+    fig = plot_backtest(
+        result["data"], result["strategy_name"], chart_mode="K线图",
+        buy_points=result["buy_points"], sell_points=result["sell_points"],
+        trades=result["trades"], yaxis_range=(price_lo, price_hi), theme=theme,
+    )
+
+    if "chart_version" not in st.session_state:
+        st.session_state.chart_version = 0
+
+    chart_html = _build_chart_html(
+        fig, version=st.session_state.chart_version, theme=theme,
+        auto_zoom=st.session_state.get("auto_zoom_pending", False),
+    )
+    st.session_state.auto_zoom_pending = False
+    st.components.v1.html(chart_html, height=780)
+    st.caption("点击 K 线 → 放大 60 天 | 双击空白 → 重置 | Q=缩放 W=平移 E=全览")
+
+    if st.button("重置缩放", key="reset_zoom"):
+        st.session_state.chart_version += 1
+        st.rerun()
+
+    if result["trades"]:
+        st.subheader("交易明细")
+        trade_df = pd.DataFrame(result["trades"])
+        display_cols = [c for c in
+                        ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
+                        if c in trade_df.columns]
+        st.dataframe(
+            trade_df[display_cols], use_container_width=True, hide_index=True,
+            column_config={
+                "买入价": st.column_config.NumberColumn(format="¥%.2f"),
+                "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
+            }
+        )
+    else:
+        st.info("本次回测期间无交易记录")
