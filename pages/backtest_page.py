@@ -468,44 +468,38 @@ def render():
 
 # ============================================================
 # ============================================================
-#  _render_fund  — 基金策略回测（参数即变即跑）
+#  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
 # ============================================================
 def _render_fund(item, theme):
-    """选中基金 → 获取净值 → 策略回测 → 净值折线图 + 买卖信号"""
+    """策略/参数/收益指标 → 侧边栏；净值图/交易明细 → 主区域"""
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="fund_s")
-    with c2:
-        st.info(f"📊 {item['name']}  ({item['code']})")
-
-    c4, c5 = st.columns([1, 1])
-    with c4:
-        backtest_start = st.date_input(
-            "回测起始日期", value=datetime.now() - timedelta(days=365 * 3),
-            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_start",
-        )
-    with c5:
-        backtest_end = st.date_input(
-            "回测结束日期", value=datetime.now(),
-            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_end",
-        )
-
-    initial_cash = st.number_input("初始资金（元）", 1000, 10000000, 100000, 10000, key="fund_cash")
-
+    # ---- 侧边栏：策略选择 ----
+    strategy_name = st.sidebar.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="fund_s")
     strat_info = STRATEGY_REGISTRY[strategy_name]
-    st.caption(strat_info["desc"])
+    st.sidebar.caption(strat_info["desc"])
 
+    # ---- 侧边栏：日期与资金 ----
+    st.sidebar.markdown("**回测参数**")
+    backtest_start = st.sidebar.date_input(
+        "起始日期", value=datetime.now() - timedelta(days=365 * 3),
+        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_start",
+    )
+    backtest_end = st.sidebar.date_input(
+        "结束日期", value=datetime.now(),
+        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_end",
+    )
+    initial_cash = st.sidebar.number_input("初始资金（元）", 1000, 10000000, 100000, 10000, key="fund_cash")
+
+    # ---- 侧边栏：策略参数滑块 ----
+    st.sidebar.markdown("**策略参数**")
     params = {}
     labels = strat_info.get("param_labels", {})
-    pcols = st.columns(len(strat_info["params"]))
-    for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
-        with pcols[i]:
-            step = 0.1 if isinstance(pdef, float) else 1
-            label = labels.get(pn, pn)
-            params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
+    for pn, (pmin, pmax, pdef) in strat_info["params"].items():
+        step = 0.1 if isinstance(pdef, float) else 1
+        label = labels.get(pn, pn)
+        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
 
     # ---- 净值数据获取（缓存，仅切换基金时重新拉取） ----
     nav_cache_key = f"fund_nav_{item['code']}"
@@ -528,11 +522,6 @@ def _render_fund(item, theme):
         st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
         return
 
-    st.caption(
-        f"全量数据：{full_data.index[0].strftime('%Y-%m-%d')} ~ {full_data.index[-1].strftime('%Y-%m-%d')}"
-        f"，共 {len(full_data)} 日 | 回测区间 {len(data)} 日"
-    )
-
     # ---- 参数指纹 → 图表版本 ----
     fp = f"{strategy_name}|{sorted(params.items())}|{backtest_start}|{backtest_end}|{initial_cash}"
     if st.session_state.get("_fund_fp") != fp:
@@ -544,20 +533,22 @@ def _render_fund(item, theme):
         result = run_backtest(data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name)
 
-    st.divider()
-
-    # ---- 指标卡片 ----
+    # ---- 侧边栏：收益指标 ----
+    st.sidebar.divider()
+    st.sidebar.markdown("**收益指标**")
     m = result["metrics"]
-    mn1, mn2, mn3 = st.columns(3)
-    mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    mn2.metric("最大回撤", m["最大回撤"])
-    mn3.metric("夏普比率", m["夏普比率"])
-    mn4, mn5, mn6 = st.columns(3)
-    mn4.metric("胜率", m["胜率"])
-    mn5.metric("交易次数", m["交易次数"])
-    mn6.metric("最终资金", m["最终资金"])
+    st.sidebar.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    st.sidebar.metric("最大回撤", m["最大回撤"])
+    st.sidebar.metric("夏普比率", m["夏普比率"])
+    st.sidebar.metric("胜率", m["胜率"])
+    st.sidebar.metric("交易次数", m["交易次数"])
+    st.sidebar.metric("最终资金", m["最终资金"])
 
-    st.divider()
+    # ======== 主区域：图表 + 明细 ========
+    st.caption(
+        f"全量数据：{full_data.index[0].strftime('%Y-%m-%d')} ~ {full_data.index[-1].strftime('%Y-%m-%d')}"
+        f"，共 {len(full_data)} 日 | 回测区间 {len(data)} 日"
+    )
 
     explanation = result.get("explanation", {})
     if explanation:
@@ -612,51 +603,47 @@ def _render_fund(item, theme):
 
 
 # ============================================================
-#  _render_backtest  — 股票回测（参数即变即跑）
+#  _render_backtest  — 股票回测（侧边栏参数 + 主区 K 线）
 # ============================================================
 def _render_backtest(item, theme):
-    """选中股票/演示 → 策略回测 → K 线"""
+    """策略/参数/收益指标 → 侧边栏；K 线/交易明细 → 主区域"""
     is_demo = item["type"] == "demo"
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
-    with c2:
-        if is_demo:
-            st.info("📊 演示数据（模拟走势）")
-        else:
-            st.info(f"📈 {item['name']}  ({item['code']})")
+    # ---- 侧边栏：标的标识 ----
+    if not is_demo:
+        st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[股票]*")
+    else:
+        st.sidebar.markdown("*[演示数据 — 模拟走势]*")
 
-    c4, c5 = st.columns([1, 1])
-    with c4:
-        backtest_start = st.date_input(
-            "回测起始日期", value=datetime.now() - timedelta(days=365),
-            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_start",
-        )
-    with c5:
-        backtest_end = st.date_input(
-            "回测结束日期", value=datetime.now(),
-            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_end",
-        )
-
-    initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
-
+    # ---- 侧边栏：策略选择 ----
+    strategy_name = st.sidebar.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
     strat_info = STRATEGY_REGISTRY[strategy_name]
-    st.caption(strat_info["desc"])
+    st.sidebar.caption(strat_info["desc"])
 
+    # ---- 侧边栏：日期与资金 ----
+    st.sidebar.markdown("**回测参数**")
+    backtest_start = st.sidebar.date_input(
+        "起始日期", value=datetime.now() - timedelta(days=365),
+        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_start",
+    )
+    backtest_end = st.sidebar.date_input(
+        "结束日期", value=datetime.now(),
+        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_end",
+    )
+    initial_cash = st.sidebar.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
+
+    # ---- 侧边栏：策略参数滑块 ----
+    st.sidebar.markdown("**策略参数**")
     params = {}
     labels = strat_info.get("param_labels", {})
-    pcols = st.columns(len(strat_info["params"]))
-    for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
-        with pcols[i]:
-            step = 0.1 if isinstance(pdef, float) else 1
-            label = labels.get(pn, pn)
-            params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+    for pn, (pmin, pmax, pdef) in strat_info["params"].items():
+        step = 0.1 if isinstance(pdef, float) else 1
+        label = labels.get(pn, pn)
+        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
 
     # ---- 数据获取（缓存，仅切换标的时重新拉取） ----
     if is_demo:
         data = generate_demo_data(300)
-        st.caption("演示数据（模拟走势）")
     else:
         stock_cache_key = f"stock_data_{item['code']}"
         if stock_cache_key not in st.session_state:
@@ -667,10 +654,6 @@ def _render_backtest(item, theme):
                 return
             st.session_state[stock_cache_key] = raw
         data = st.session_state[stock_cache_key]
-        st.caption(
-            f"数据范围：{data.index[0].strftime('%Y-%m-%d')} ~ {data.index[-1].strftime('%Y-%m-%d')}"
-            f"，共 {len(data)} 个交易日"
-        )
 
     # ---- 日期过滤 ----
     start_dt = pd.Timestamp(backtest_start)
@@ -691,20 +674,25 @@ def _render_backtest(item, theme):
         result = run_backtest(data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name)
 
-    st.divider()
-
-    # ---- 指标卡片 ----
+    # ---- 侧边栏：收益指标 ----
+    st.sidebar.divider()
+    st.sidebar.markdown("**收益指标**")
     m = result["metrics"]
-    mn1, mn2, mn3 = st.columns(3)
-    mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    mn2.metric("最大回撤", m["最大回撤"])
-    mn3.metric("夏普比率", m["夏普比率"])
-    mn4, mn5, mn6 = st.columns(3)
-    mn4.metric("胜率", m["胜率"])
-    mn5.metric("交易次数", m["交易次数"])
-    mn6.metric("最终资金", m["最终资金"])
+    st.sidebar.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    st.sidebar.metric("最大回撤", m["最大回撤"])
+    st.sidebar.metric("夏普比率", m["夏普比率"])
+    st.sidebar.metric("胜率", m["胜率"])
+    st.sidebar.metric("交易次数", m["交易次数"])
+    st.sidebar.metric("最终资金", m["最终资金"])
 
-    st.divider()
+    # ======== 主区域：K 线 + 明细 ========
+    if is_demo:
+        st.caption("演示数据（模拟走势）")
+    else:
+        st.caption(
+            f"数据范围：{data.index[0].strftime('%Y-%m-%d')} ~ {data.index[-1].strftime('%Y-%m-%d')}"
+            f"，共 {len(data)} 个交易日"
+        )
 
     explanation = result.get("explanation", {})
     if explanation:
