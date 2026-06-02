@@ -431,25 +431,91 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 #  render()
 # ============================================================
 def render():
-    # ========== 顶部栏：标题 + 主题切换 ==========
+    # ========== 顶部栏：标题 + 主题切换按钮 ==========
     col_title, col_theme = st.columns([6, 1])
     with col_title:
         st.title("策略回测")
     with col_theme:
-        theme_label = st.radio("主题", ["夜间", "白天"], key="theme", label_visibility="collapsed")
-    theme = "dark" if theme_label == "夜间" else "light"
+        if "_theme_mode" not in st.session_state:
+            st.session_state._theme_mode = "dark"
+
+        if st.session_state._theme_mode == "dark":
+            btn_label, btn_help = "☀️", "切换到白天模式"
+        else:
+            btn_label, btn_help = "🌙", "切换到夜间模式"
+
+        if st.button(btn_label, key="theme_toggle", help=btn_help):
+            st.session_state._theme_mode = "light" if st.session_state._theme_mode == "dark" else "dark"
+            st.rerun()
+
+    theme = st.session_state._theme_mode
 
     if theme == "light":
         st.markdown("""
         <style>
-        [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: #ffffff !important; }
-        [data-testid="stSidebar"] { background: #f8f9fa !important; }
-        [data-testid="stSidebar"] * { color: #1f2937 !important; }
+        /* ── 背景 ── */
+        [data-testid="stAppViewContainer"], [data-testid="stHeader"],
         .stApp { background: #ffffff !important; }
-        h1, h2, h3, p, label, .stMarkdown, .stRadio label, .stSelectbox label,
-        .stDateInput label, .stNumberInput label, .stSlider label,
-        [data-testid="stMetricValue"], .stDataFrame { color: #1f2937 !important; }
-        section[data-testid="stSidebar"] .stRadio label { color: #1f2937 !important; }
+        [data-testid="stSidebar"] { background: #f8f9fa !important; }
+
+        /* ── 主区域文本 ── */
+        h1, h2, h3, h4, p, label, .stMarkdown, .stCaption,
+        [data-testid="stExpander"] summary,
+        [data-testid="stExpander"] .stMarkdown { color: #1f2937 !important; }
+
+        /* ── 控件标签 ── */
+        .stSelectbox label, .stDateInput label, .stNumberInput label, .stSlider label,
+        .stRadio label, .stCheckbox label { color: #1f2937 !important; }
+
+        /* ── 输入框内文字 ── */
+        [data-testid="stNumberInput"] input { color: #1f2937 !important; background: #ffffff !important; border-color: #d1d5db !important; }
+        [data-testid="stDateInput"] input { color: #1f2937 !important; background: #ffffff !important; border-color: #d1d5db !important; }
+        [data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="input"] { color: #1f2937 !important; background: #ffffff !important; }
+        [data-testid="stSelectbox"] [data-baseweb="popover"] li { color: #1f2937 !important; }
+
+        /* ── 滑块值 ── */
+        .stSlider [data-testid="stThumbValue"] { color: #1f2937 !important; background: #e5e7eb !important; }
+
+        /* ── Metric ── */
+        [data-testid="stMetricValue"] { color: #1f2937 !important; }
+        [data-testid="stMetricDelta"] { color: #059669 !important; }
+
+        /* ── DataFrame ── */
+        .stDataFrame, .stDataFrame * { color: #1f2937 !important; }
+        .stDataFrame th { background: #f3f4f6 !important; }
+
+        /* ── Alert / Info / Warning ── */
+        .stAlert { color: #1f2937 !important; }
+        div[data-testid="stNotification"] { color: #1f2937 !important; }
+
+        /* ── Button ── */
+        .stButton > button[kind="primary"] { color: #ffffff !important; }
+
+        /* ── Spinner ── */
+        .stSpinner > div { border-top-color: #3b82f6 !important; }
+
+        /* ── 分隔线 ── */
+        hr { border-color: #e5e7eb !important; }
+
+        /* ── 侧边栏 ── */
+        section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
+        section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] .stMarkdown,
+        section[data-testid="stSidebar"] .stCaption, section[data-testid="stSidebar"] .stSelectbox label,
+        section[data-testid="stSidebar"] .stDateInput label, section[data-testid="stSidebar"] .stNumberInput label,
+        section[data-testid="stSidebar"] .stSlider label, section[data-testid="stSidebar"] [data-testid="stMetricValue"],
+        section[data-testid="stSidebar"] [data-testid="stMetricDelta"],
+        section[data-testid="stSidebar"] [data-testid="stNumberInput"] input,
+        section[data-testid="stSidebar"] [data-testid="stDateInput"] input,
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="input"],
+        section[data-testid="stSidebar"] .stSlider [data-testid="stThumbValue"],
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="popover"] li
+        { color: #1f2937 !important; }
+
+        section[data-testid="stSidebar"] [data-testid="stNumberInput"] input,
+        section[data-testid="stSidebar"] [data-testid="stDateInput"] input,
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="input"]
+        { background: #ffffff !important; border-color: #d1d5db !important; }
         </style>
         """, unsafe_allow_html=True)
 
