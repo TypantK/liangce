@@ -358,6 +358,221 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     return fig
 
 
+def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
+                       trades=None, yaxis_range=None, theme="dark"):
+    """
+    基金回测净值折线图 + 买卖信号标注。
+    与 plot_backtest 风格一致，但用折线图代替 K 线，不显示成交量。
+    """
+    buy_points = buy_points or []
+    sell_points = sell_points or []
+    trades = trades or []
+
+    df = data[["close"]].copy()
+    df.index = pd.to_datetime(df.index)
+    dti = df.index
+    n = len(df)
+
+    # ---- 主题配色 ----
+    if theme == "light":
+        _bg      = LIGHT_BG
+        _grid_c  = LIGHT_GRID_C
+        _fg      = LIGHT_FG
+        _fg_soft = LIGHT_FG_SOFT
+        _card_bg = LIGHT_CARD_BG
+        _line_c  = LIGHT_LINE_C
+        _template = 'plotly_white'
+        _legend_bg = 'rgba(243,244,246,0.92)'
+    else:
+        _bg      = BG
+        _grid_c  = GRID_C
+        _fg      = FG
+        _fg_soft = FG_SOFT
+        _card_bg = CARD_BG
+        _line_c  = '#2a2d3e'
+        _template = 'plotly_dark'
+        _legend_bg = 'rgba(26,29,46,0.92)'
+
+    # ---- 均线 ----
+    ma5  = df["close"].rolling(5).mean()
+    ma20 = df["close"].rolling(20).mean()
+
+    # ---- 买卖点 scatter ----
+    bp_idx = [dti[idx] for idx, _ in buy_points if idx < n]
+    bp_val = [p for idx, p in buy_points if idx < n]
+    sp_idx = [dti[idx] for idx, _ in sell_points if idx < n]
+    sp_val = [p for idx, p in sell_points if idx < n]
+
+    # ---- hover 浮窗 ----
+    trade_by_entry = {}
+    trade_by_exit = {}
+    for t in trades:
+        ed = t.get("买入时间", "")[:10]
+        sd = t.get("卖出时间", "")[:10]
+        if ed:
+            trade_by_entry[ed] = t
+        if sd:
+            trade_by_exit[sd] = t
+
+    buy_hover = []
+    for idx, price in buy_points:
+        if 0 <= idx < n:
+            date_str = dti[idx].strftime('%Y-%m-%d')
+            t = trade_by_entry.get(date_str)
+            if t:
+                reason = t.get("买入原因", "策略信号")
+                buy_hover.append(
+                    f"<b>买入</b> | {date_str}<br>"
+                    f"净值: {t['买入价']}<br>"
+                    f"<b>触发条件:</b> {reason}"
+                )
+            else:
+                buy_hover.append(
+                    f"<b>买入</b> | {date_str}<br>"
+                    f"净值: {price:.4f}<br>"
+                    f"触发条件: {strategy_name}买入信号"
+                )
+
+    sell_hover = []
+    for idx, price in sell_points:
+        if 0 <= idx < n:
+            date_str = dti[idx].strftime('%Y-%m-%d')
+            t = trade_by_exit.get(date_str)
+            if t:
+                reason = t.get("卖出原因", "策略信号")
+                sell_hover.append(
+                    f"<b>卖出</b> | {date_str}<br>"
+                    f"净值: {t['卖出价']}<br>"
+                    f"盈亏: {t['盈亏']}<br>"
+                    f"<b>触发条件:</b> {reason}"
+                )
+            else:
+                sell_hover.append(
+                    f"<b>卖出</b> | {date_str}<br>"
+                    f"净值: {price:.4f}<br>"
+                    f"触发条件: {strategy_name}卖出信号"
+                )
+
+    # ---- 默认可视范围 ----
+    if n > 90:
+        default_x0 = dti[n - 90]
+        default_x1 = dti[-1]
+    else:
+        default_x0 = dti[0]
+        default_x1 = dti[-1]
+
+    fig = go.Figure()
+
+    # 净值折线
+    fig.add_trace(go.Scatter(
+        x=dti, y=df["close"], name="单位净值",
+        line=dict(color="#e7505a", width=1.8),
+        hovertemplate='%{x|%Y-%m-%d}<br>净值: %{y:.4f}<extra></extra>',
+    ))
+
+    # MA5
+    fig.add_trace(go.Scatter(
+        x=dti, y=ma5, name="MA5",
+        line=dict(color=MA5_COLOR, width=1.3, dash="dot"),
+        hovertemplate='MA5: %{y:.4f}<extra></extra>',
+    ))
+
+    # MA20
+    fig.add_trace(go.Scatter(
+        x=dti, y=ma20, name="MA20",
+        line=dict(color=MA20_COLOR, width=1.3, dash="dot"),
+        hovertemplate='MA20: %{y:.4f}<extra></extra>',
+    ))
+
+    # 买入/卖出竖虚线
+    for x_date in bp_idx:
+        fig.add_vline(x=x_date, line_dash="dash", line_color=BUY_TRI,
+                       line_width=1.2, opacity=0.65)
+    for x_date in sp_idx:
+        fig.add_vline(x=x_date, line_dash="dash", line_color=SELL_TRI,
+                       line_width=1.2, opacity=0.65)
+
+    # 买入标记（朝下三角）
+    if bp_idx:
+        fig.add_trace(go.Scatter(
+            x=bp_idx, y=bp_val, name="买入",
+            mode="markers",
+            marker=dict(
+                symbol="triangle-down", size=9,
+                color=BUY_TRI,
+                line=dict(color="white", width=1),
+            ),
+            text=buy_hover,
+            hoverinfo="text",
+            hoverlabel=dict(
+                bgcolor=_card_bg, font=dict(color=_fg, size=13, family=CN_FONT),
+                bordercolor=_line_c,
+            ),
+        ))
+
+    # 卖出标记（朝上三角）
+    if sp_idx:
+        fig.add_trace(go.Scatter(
+            x=sp_idx, y=sp_val, name="卖出",
+            mode="markers",
+            marker=dict(
+                symbol="triangle-up", size=9,
+                color=SELL_TRI,
+                line=dict(color="white", width=1),
+            ),
+            text=sell_hover,
+            hoverinfo="text",
+            hoverlabel=dict(
+                bgcolor=_card_bg, font=dict(color=_fg, size=13, family=CN_FONT),
+                bordercolor=_line_c,
+            ),
+        ))
+
+    fig.update_layout(
+        template=_template,
+        paper_bgcolor=_bg, plot_bgcolor=_bg,
+        font=dict(color=_fg, size=11, family=CN_FONT),
+        title=dict(
+            text=f"<b>{strategy_name}</b> — 基金净值",
+            font=dict(color=_fg, size=17, family=CN_FONT),
+            x=0.01, xanchor="left",
+        ),
+        height=650, hovermode="closest",
+        showlegend=True,
+        legend=dict(
+            orientation="h", yanchor="top", y=1.06, xanchor="left", x=0.01,
+            bgcolor=_legend_bg, bordercolor=_grid_c, borderwidth=1,
+            font=dict(color=_fg_soft, size=10, family=CN_FONT),
+        ),
+        margin=dict(l=60, r=30, t=55, b=40),
+        dragmode="pan",
+        clickmode="event",
+    )
+
+    fig.update_xaxes(
+        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        linecolor=_line_c, linewidth=1,
+        autorange=False,
+        range=[default_x0, default_x1],
+        rangeslider=dict(
+            visible=True, thickness=0.06,
+            bgcolor=("#f3f4f6" if theme == "light" else "#1c1f2e"),
+            bordercolor=_grid_c, borderwidth=1,
+        ),
+    )
+
+    fig.update_yaxes(
+        title_text="单位净值 (元)",
+        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        linecolor=_line_c, linewidth=1,
+        title_font=dict(color=_fg_soft, size=10, family=CN_FONT),
+        fixedrange=False,
+        range=yaxis_range,
+    )
+
+    return fig
+
+
 def render_strategy_card(strategy_name, explanation):
     """生成策略大白话解释的 Markdown/HTML 文本（Streamlit 侧渲染）"""
     if not explanation:

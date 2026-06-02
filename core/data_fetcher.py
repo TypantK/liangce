@@ -268,6 +268,33 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     return None
 
 
+def fund_nav_to_ohlcv(nav_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    将基金净值数据转为 OHLCV 格式，供回测引擎使用。
+    基金只有每日单位净值，没有 OHLCV，此处模拟生成。
+
+    nav_df: ak.fund_open_fund_info_em 返回的 DataFrame，
+            含 'date' 和 'nav'（单位净值）两列。
+    Returns: DataFrame with DatetimeIndex + OHLCV columns
+    """
+    df = nav_df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").set_index("date")
+
+    # close = 当日净值
+    df["close"] = df["nav"]
+    # open = 前一日净值（首日与当日相同）
+    df["open"] = df["nav"].shift(1)
+    df["open"].fillna(df["nav"], inplace=True)
+    # high / low = open 和 close 的较大/较小值
+    df["high"] = df[["open", "close"]].max(axis=1)
+    df["low"] = df[["open", "close"]].min(axis=1)
+    # 固定成交量（基金无成交量概念，给一个占位值避免 backtrader 报错）
+    df["volume"] = 1000000
+
+    return df[["open", "high", "low", "close", "volume"]]
+
+
 def generate_demo_data(n_bars: int = 300) -> pd.DataFrame:
     """
     生成日线模拟数据用于演示。

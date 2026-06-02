@@ -12,9 +12,9 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from core.strategies import STRATEGY_REGISTRY
-from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data
+from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data, fund_nav_to_ohlcv
 from core.engine import run_backtest
-from utils.chart import plot_backtest, render_strategy_card
+from utils.chart import plot_backtest, render_strategy_card, plot_fund_backtest
 
 # ---- pypinyin 智能搜索 ----
 try:
@@ -425,14 +425,18 @@ def render():
     theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
     theme = "dark" if theme_label == "夜间" else "light"
 
-    # ========== 统一数据源选择（键入即过滤） ==========
+    # ========== 统一数据源选择（键入即过滤，含拼音首字母） ==========
     all_labels = []
     for it in UNIFIED_POOL:
         tag = TYPE_TAGS.get(it["type"], "?")
+        pyf = it.get("pinyin_first", "")
         if it["code"]:
-            all_labels.append(f"[{tag}] {it['name']} ({it['code']})")
+            all_labels.append(f"[{tag}] {pyf} {it['name']} ({it['code']})")
         else:
-            all_labels.append(f"[{tag}] {it['name']}")
+            all_labels.append(f"[{tag}] {pyf} {it['name']}")
+
+    # label → item 映射，避免 index 匹配
+    label_map = dict(zip(all_labels, UNIFIED_POOL))
 
     # 默认选中演示数据
     default_idx = 0
@@ -442,8 +446,7 @@ def render():
             break
 
     selected_label = st.selectbox("数据源", all_labels, index=default_idx, key="ds_select")
-    selected_idx = all_labels.index(selected_label)
-    item = UNIFIED_POOL[selected_idx]
+    item = label_map[selected_label]
 
     # ========== 按类型分支 ==========
     if item["type"] == "fund":
