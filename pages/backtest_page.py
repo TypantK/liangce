@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-策略回测页面 v2 — Plotly 交互式图表 + 大白话策略解释
+策略回测页面 v3 — Plotly 交互式图表 + 基金净值浏览 + 智能拼音搜索
 """
 
 import sys, os
@@ -8,19 +8,93 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 import streamlit as st
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from core.strategies import STRATEGY_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data
 from core.engine import run_backtest
 from utils.chart import plot_backtest, render_strategy_card
 
+# ---- pypinyin 智能搜索 ----
+try:
+    from pypinyin import lazy_pinyin
+    _PY_AVAIL = True
+except ImportError:
+    _PY_AVAIL = False
+
+
+def _make_fund_pool():
+    """构建带拼音的基金池"""
+    funds_raw = [
+        ("011172", "广发利鑫混合C"),
+        ("000001", "华夏成长混合"),
+        ("001933", "华商新兴活力混合"),
+        ("005827", "易方达蓝筹精选混合"),
+        ("161725", "招商中证白酒指数(LOF)A"),
+        ("270002", "广发稳健增长混合A"),
+        ("110011", "易方达中小盘混合"),
+        ("002001", "华夏回报混合A"),
+        ("519674", "银河创新成长混合A"),
+        ("163406", "兴全合润混合(LOF)"),
+        ("320007", "诺安成长混合"),
+        ("000083", "汇添富消费行业混合"),
+    ]
+    pool = []
+    for code, name in funds_raw:
+        if _PY_AVAIL:
+            py = ''.join(lazy_pinyin(name))
+            pyf = ''.join([p[0] for p in lazy_pinyin(name)])
+        else:
+            py = name.lower()
+            pyf = ''.join([w[0] for w in name])
+        pool.append({"code": code, "name": name, "pinyin": py, "pinyin_first": pyf})
+    return pool
+
+
+FUND_POOL = _make_fund_pool()
+
+
+def search_funds(query):
+    """拼音/中文/代码智能搜索"""
+    if not query or not query.strip():
+        return FUND_POOL
+    q = query.strip().lower()
+    results = []
+    for f in FUND_POOL:
+        if (q in f["code"] or q in f["name"].lower() or
+                q in f["pinyin"] or q in f["pinyin_first"]):
+            results.append(f)
+    return results
+
+
+def get_fund_nav(code):
+    """通过 akshare 获取基金净值历史"""
+    try:
+        import akshare as ak
+        df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
+        df = df.rename(columns={"净值日期": "date", "单位净值": "nav"})
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+        return df
+    except Exception:
+        return None
+
+
+# ---- Plotly 深色主题配色 ----
+BG      = '#131520'
+GRID_C  = '#1f2335'
+FG      = '#c8cce0'
+FG_SOFT = '#6b7094'
+LINE_C  = '#2a2d3e'
+CN_FONT = 'PingFang SC, Microsoft YaHei, SimHei, Arial Unicode MS, sans-serif'
+
 
 def _build_chart_html(fig, version=0, theme="dark", auto_zoom=False):
-    """Generate HTML with embedded JS for click-to-zoom (mirrors test_click.html approach)."""
+    """Generate HTML with embedded JS for click-to-zoom."""
     import uuid
     chart_id = f"chart_{uuid.uuid4().hex[:8]}"
 
-    # theme-aware background
     if theme == "light":
         _body_bg = '#ffffff'
         _body_color = '#1f2937'
@@ -60,79 +134,55 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         dbg.textContent = msg;
         console.log('[chart] ' + msg);
     }}
-    // ─── VERBOSE DEBUG LOGGER ──────────────────────────────────────────
+
     var _vLog = [];
     function vlog(tag, payload) {{
         var ts = new Date().toISOString().slice(11,23);
         var entry = '[' + ts + '] ' + tag;
         if (payload !== undefined) {{
-            try {{
-                entry += ' ' + JSON.stringify(payload).slice(0,500);
-            }} catch(e) {{
-                entry += ' ' + String(payload).slice(0,500);
-            }}
+            try {{ entry += ' ' + JSON.stringify(payload).slice(0,500); }} catch(e) {{ entry += ' ' + String(payload).slice(0,500); }}
         }}
         _vLog.unshift(entry);
         if (_vLog.length > 40) _vLog.length = 40;
         console.log('[chart-d] ' + entry);
-        // Also show on screen
         dbg.textContent = _vLog.slice(0, 15).join('\\n');
         scheduleDump();
     }}
-    function dumpLog() {{
-        console.table(_vLog.map(function(s) {{ return {{entry:s}}; }}));
-    }}
+    function dumpLog() {{ console.table(_vLog.map(function(s) {{ return {{entry:s}}; }})); }}
 
-    // ─── DUMP TO FILE (img beacon, zero CORS issues) ──────────────────
     var _dumpUrl = 'http://127.0.0.1:19876/log';
     function dumpToFile() {{
-        var payload = JSON.stringify({{
-            time: new Date().toISOString(),
+        var payload = JSON.stringify({{time: new Date().toISOString(),
             autorange: {{x:(gd._fullLayout||{{}}).xaxis||{{}}.autorange, y:(gd._fullLayout||{{}}).yaxis||{{}}.autorange}},
-            dragmode: (gd._fullLayout||{{}}).dragmode,
-            clickCount: clickCount,
-            log: _vLog}});
-        // img beacon: no preflight, no CORS, works everywhere
+            dragmode: (gd._fullLayout||{{}}).dragmode, clickCount: clickCount, log: _vLog}});
         var img = new Image();
         img.src = _dumpUrl + '?d=' + encodeURIComponent(payload);
-        img.onerror = function(){{ /* expected: server closes after 200 */ }};
+        img.onerror = function(){{}};
     }}
-
-    // Also expose manual dump via keyboard: press 'd' key
     document.addEventListener('keydown', function(e) {{
-        if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {{
-            dumpToFile();
-            console.log('[chart] manual dump triggered');
-        }}
+        if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {{ dumpToFile(); }}
     }});
-
-    // Auto-dump on every vlog (debounced 1s)
     var _dumpTimer = null;
     function scheduleDump() {{
         if (_dumpTimer) clearTimeout(_dumpTimer);
         _dumpTimer = setTimeout(dumpToFile, 1000);
     }}
-    // ─── PLOTLY INTERNAL EVENT SPY ─────────────────────────────────────
+
     function spyPlotlyEvents() {{
-        // Hook into Plotly's internal emit to catch ALL events
         var origEmit = gd.emit;
-        var spyCount = 0;
         gd.emit = function() {{
-            spyCount++;
             var eventName = arguments[0];
             if (eventName === 'plotly_click' || eventName === 'plotly_relayout' ||
                 eventName === 'plotly_doubleclick' || eventName === 'plotly_afterplot') {{
                 var hasPoints = '???';
                 if (eventName === 'plotly_click') {{
-                    try {{
-                        hasPoints = arguments[1] && arguments[1].points ? arguments[1].points.length : 0;
-                    }} catch(e) {{ hasPoints = 'err'; }}
+                    try {{ hasPoints = arguments[1] && arguments[1].points ? arguments[1].points.length : 0; }} catch(e) {{ hasPoints = 'err'; }}
                 }}
                 vlog('EMIT:' + eventName + ' pts=' + hasPoints);
             }}
             return origEmit.apply(this, arguments);
         }};
-        vlog('spy-installed emit#calls=' + spyCount);
+        vlog('spy-installed');
     }}
 
     function findDateIndex(allX, targetX) {{
@@ -155,8 +205,9 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
                 'yaxis.autorange': false,
                 'xaxis.range': [allX[startIdx], allX[endIdx]]
             }};
-            // Y 轴同步 — 取 Candlestick trace 中区间内 high/low 极值
             var fullTraces = gd._fullData || gd.data;
+            var found = false;
+            // 1) Candlestick/OHLC → use high/low
             for (var t = 0; t < fullTraces.length; t++) {{
                 var tr = fullTraces[t];
                 if ((tr.type === 'candlestick' || tr.type === 'ohlc') && tr.high && tr.low) {{
@@ -170,7 +221,29 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
                         var pad = (yHi - yLo) * 0.08;
                         relayoutObj['yaxis.range'] = [yLo - pad, yHi + pad];
                     }}
+                    found = true;
                     break;
+                }}
+            }}
+            // 2) Fallback: Scatter/line trace → use y values
+            if (!found) {{
+                for (var t = 0; t < fullTraces.length; t++) {{
+                    var tr2 = fullTraces[t];
+                    if (tr2.type === 'scatter' && tr2.y && tr2.y.length > 0) {{
+                        var yHi = -Infinity, yLo = Infinity;
+                        for (var i = startIdx; i <= endIdx; i++) {{
+                            var v = tr2.y[i];
+                            if (v != null && isFinite(v)) {{
+                                if (v > yHi) yHi = v;
+                                if (v < yLo) yLo = v;
+                            }}
+                        }}
+                        if (isFinite(yHi) && isFinite(yLo) && yHi > yLo) {{
+                            var pad = (yHi - yLo) * 0.08;
+                            relayoutObj['yaxis.range'] = [yLo - pad, yHi + pad];
+                        }}
+                        break;
+                    }}
                 }}
             }}
             Plotly.relayout(gd, relayoutObj);
@@ -181,22 +254,19 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         vlog('bindClickHandlers BEGIN');
         gd.removeAllListeners('plotly_click');
         gd.removeAllListeners('plotly_selected');
-
-        // Also remove any leftover internal listeners that may block
         gd.removeAllListeners('plotly_doubleclick');
 
         gd.on('plotly_click', function(data) {{
             clickCount++;
             var pts = (data && data.points) ? data.points.length : 0;
-            vlog('CLICK#' + clickCount + ' pts=' + pts + ' event=' + (data ? data.event : '?'));
+            vlog('CLICK#' + clickCount + ' pts=' + pts);
             if (!pts) return;
             var pt = data.points[0];
             var allX = pt.data.x;
-            var traceName = (pt.data.name || pt.fullData || {{}}).name || '';
             if (!allX || allX.length === 0) return;
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
-            vlog('ZOOM from=' + idx + ' trace=' + traceName);
+            vlog('ZOOM from=' + idx);
             zoomToRange(allX, idx - 30, idx + 30);
         }});
 
@@ -211,9 +281,7 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
             if (!allX || !allX.length) return;
             var startIdx = findDateIndex(allX, data.range.x[0]);
             var endIdx = findDateIndex(allX, data.range.x[1]);
-            if (startIdx >= 0 && endIdx >= 0) {{
-                zoomToRange(allX, startIdx, endIdx);
-            }}
+            if (startIdx >= 0 && endIdx >= 0) zoomToRange(allX, startIdx, endIdx);
         }});
 
         vlog('bindClickHandlers DONE');
@@ -222,8 +290,7 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
     function dumpAutorangeState(tag) {{
         try {{
             var la = gd._fullLayout || {{}};
-            var xa = la.xaxis || {{}};
-            var ya = la.yaxis || {{}};
+            var xa = la.xaxis || {{}}, ya = la.yaxis || {{}};
             vlog('AUTORANGE:' + tag + ' x=' + xa.autorange + ' y=' + ya.autorange +
                  ' dm=' + la.dragmode + ' xrange=' + JSON.stringify(xa.range).slice(0,80));
         }} catch(e) {{ vlog('AUTORANGE:' + tag + ' err'); }}
@@ -233,52 +300,38 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         if (zoomReady || !gd) {{ vlog('setupZoom skip ready=' + zoomReady + ' gd=' + !!gd); return; }}
         zoomReady = true;
         vlog('setupZoom START');
-
         spyPlotlyEvents();
         bindClickHandlers();
         dumpAutorangeState('initial');
 
-        // Re-bind after autoscale / zoom / rangeslider (relayout resets drag layer)
         var rebindLock = false;
         gd.on('plotly_relayout', function(eventData) {{
-            var edKeys = Object.keys(eventData || {{}}).join(',');
-            vlog('RELAYOUT keys=[' + edKeys + '] lock=' + rebindLock);
-            dumpAutorangeState('relayout-before-handle');
             if (rebindLock) {{ vlog('RELAYOUT skip (locked)'); return; }}
             rebindLock = true;
-
             var isAutoscale = eventData && ('xaxis.autorange' in eventData || 'yaxis.autorange' in eventData);
             var delay = isAutoscale ? 300 : 80;
-            vlog('RELAYOUT isAutoscale=' + isAutoscale + ' delay=' + delay);
-
             setTimeout(function() {{
                 if (isAutoscale) {{
-                    vlog('RELAYOUT setting autorange=false');
                     Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
                     dumpAutorangeState('after-disable-autorange');
                     bindClickHandlers();
                     var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
-                    vlog('RELAYOUT warm-up dragmode=' + cd);
                     Plotly.relayout(gd, {{dragmode: cd}});
-                    setTimeout(function() {{ rebindLock = false; vlog('RELAYOUT unlock'); }}, 150);
+                    setTimeout(function() {{ rebindLock = false; }}, 150);
                 }} else {{
                     bindClickHandlers();
                     var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
-                    vlog('RELAYOUT warm-up dragmode=' + cd);
                     Plotly.relayout(gd, {{dragmode: cd}});
-                    setTimeout(function() {{ rebindLock = false; vlog('RELAYOUT unlock'); }}, 150);
+                    setTimeout(function() {{ rebindLock = false; }}, 150);
                 }}
             }}, delay);
         }});
 
         log('ready');
-
-        // Warm up
         var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
         vlog('setupZoom warm-up dragmode=' + currentDrag);
 
         if (window.__chartAutoZoom) {{
-            // 跳过 warm-up autorange=false，直接 autoscale+zoomout（与 E 键一致）
             vlog('auto-zoom START (skip warm-up)');
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
             setTimeout(function() {{
@@ -287,50 +340,32 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
                 else {{ vlog('auto-zoom zoomout btn missing'); }}
             }}, 150);
         }} else {{
-            // CRITICAL: Disable autorange on init. If autorange remains true,
-            // Plotly will NOT fire plotly_click events at all.
             Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
         }}
         dumpAutorangeState('after-init-disable');
         vlog('setupZoom DONE');
     }}
 
-    // --- Try multiple strategies to find the plot div and init ---
-
     function tryInit() {{
-        // Strategy 1: by ID
         gd = document.getElementById('{chart_id}');
-        // Strategy 2: by class
         if (!gd) gd = document.querySelector('.js-plotly-plot');
         if (!gd) gd = document.querySelector('.plotly-graph-div');
         if (!gd) gd = document.querySelector('[id^="chart_"]');
-
-        if (!gd) {{
-            log('no-div');
-            setTimeout(tryInit, 300);
-            return;
-        }}
-
+        if (!gd) {{ log('no-div'); setTimeout(tryInit, 300); return; }}
         if (gd._fullLayout && gd._fullLayout._initialized) {{
             setupZoom();
         }} else {{
             gd.once && gd.once('plotly_afterplot', setupZoom);
             gd.on('plotly_afterplot', setupZoom);
-            // Fallback: try after delay
-            setTimeout(function() {{
-                if (!zoomReady) setupZoom();
-            }}, 2000);
+            setTimeout(function() {{ if (!zoomReady) setupZoom(); }}, 2000);
         }}
     }}
 
-    // Small delay to let Plotly.newPlot start
     setTimeout(tryInit, 200);
 
-    // ─── EXPORT DEBUG API ──────────────────────────────────────────
     window.__chartDebug = {{
         getLog: function() {{ return _vLog; }},
-        dumpLog: dumpLog,
-        dumpToFile: dumpToFile,
+        dumpLog: dumpLog, dumpToFile: dumpToFile,
         getGd: function() {{ return gd; }},
         dumpAutorange: function() {{ dumpAutorangeState('manual'); }},
         getClickCount: function() {{ return clickCount; }}
@@ -342,7 +377,6 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 <script>
 (function() {{
     document.addEventListener('keydown', function(e) {{
-        // 仅在非输入元素焦点时生效，避免干扰 Streamlit 输入框
         var tag = (document.activeElement || {{}}).tagName || '';
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
         var gd = window.__chartDebug && window.__chartDebug.getGd();
@@ -352,31 +386,19 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         if (key === 'q') {{
             e.preventDefault();
             Plotly.relayout(gd, {{dragmode: 'zoom'}});
-            if (dbg) {{
-                dbg.textContent = 'Tool: ZOOM';
-                setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
-            }}
+            if (dbg) {{ dbg.textContent = 'Tool: ZOOM'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
         }} else if (key === 'w') {{
             e.preventDefault();
             Plotly.relayout(gd, {{dragmode: 'pan'}});
-            if (dbg) {{
-                dbg.textContent = 'Tool: PAN';
-                setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
-            }}
+            if (dbg) {{ dbg.textContent = 'Tool: PAN'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
         }} else if (key === 'e') {{
             e.preventDefault();
-            // 模拟 modebar autoscale + zoomout 按钮，与手动点击行为完全一致
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
             setTimeout(function() {{
                 var zoomOutBtn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
-                if (zoomOutBtn) {{
-                    zoomOutBtn.click();
-                }}
+                if (zoomOutBtn) zoomOutBtn.click();
             }}, 150);
-            if (dbg) {{
-                dbg.textContent = 'AUTOSCALE';
-                setTimeout(function(){{ dbg.textContent = '...'; }}, 1200);
-            }}
+            if (dbg) {{ dbg.textContent = 'AUTOSCALE'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
         }}
     }});
 }})();
@@ -386,226 +408,302 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
     return html
 
 
+# ============================================================
+#  render()
+# ============================================================
 def render():
     st.title("策略回测")
 
-    # ========== 侧边栏：主题选择 ==========
+    # ========== 侧边栏 ==========
     theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
     theme = "dark" if theme_label == "夜间" else "light"
 
-    # ========== 控制面板 ==========
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
-    with c2:
-        data_source = st.selectbox("数据源", ["演示数据"] + list(STOCK_POOL.keys()), key="d")
-    with c3:
-        chart_mode = st.radio("图表类型", ["K线图", "折线图"], horizontal=True, key="cm")
+    data_type = st.sidebar.radio("数据类型", ["股票回测", "基金浏览"], key="data_type")
 
-    # 回测起始 / 结束日期
-    c4, c5 = st.columns([1, 1])
-    with c4:
-        backtest_start = st.date_input(
-            "回测起始日期",
-            value=datetime.now() - timedelta(days=365),
-            min_value=datetime(2000, 1, 1),
-            max_value=datetime.now(),
-            key="bs_start",
-        )
-    with c5:
-        backtest_end = st.date_input(
-            "回测结束日期",
-            value=datetime.now(),
-            min_value=datetime(2000, 1, 1),
-            max_value=datetime.now(),
-            key="bs_end",
-        )
+    # ================================================================
+    #  模式 1：股票回测（保持全部原有逻辑）
+    # ================================================================
+    if data_type == "股票回测":
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
+        with c2:
+            data_source = st.selectbox("数据源", ["演示数据"] + list(STOCK_POOL.keys()), key="d")
 
-    initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
+        c4, c5 = st.columns([1, 1])
+        with c4:
+            backtest_start = st.date_input(
+                "回测起始日期",
+                value=datetime.now() - timedelta(days=365),
+                min_value=datetime(2000, 1, 1),
+                max_value=datetime.now(),
+                key="bs_start",
+            )
+        with c5:
+            backtest_end = st.date_input(
+                "回测结束日期",
+                value=datetime.now(),
+                min_value=datetime(2000, 1, 1),
+                max_value=datetime.now(),
+                key="bs_end",
+            )
 
-    strat_info = STRATEGY_REGISTRY[strategy_name]
-    st.caption(strat_info["desc"])
+        initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
 
-    params = {}
-    labels = strat_info.get("param_labels", {})
-    pcols = st.columns(len(strat_info["params"]))
-    for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
-        with pcols[i]:
-            step = 0.1 if isinstance(pdef, float) else 1
-            label = labels.get(pn, pn)
-            params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+        strat_info = STRATEGY_REGISTRY[strategy_name]
+        st.caption(strat_info["desc"])
 
-    # ========== 回测 ==========
-    if st.button("开始回测", type="primary", use_container_width=True):
-        st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
-        with st.spinner("获取数据..."):
-            if data_source == "演示数据":
-                data = generate_demo_data(300)
-            else:
-                data = get_stock_data(STOCK_POOL[data_source])
-                if data is None or data.empty:
-                    st.error(f"获取 {data_source} 数据失败，请检查网络")
+        params = {}
+        labels = strat_info.get("param_labels", {})
+        pcols = st.columns(len(strat_info["params"]))
+        for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
+            with pcols[i]:
+                step = 0.1 if isinstance(pdef, float) else 1
+                label = labels.get(pn, pn)
+                params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+
+        # ===== 回测按钮 =====
+        if st.button("开始回测", type="primary", use_container_width=True):
+            st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
+            with st.spinner("获取数据..."):
+                if data_source == "演示数据":
+                    data = generate_demo_data(300)
+                else:
+                    data = get_stock_data(STOCK_POOL[data_source])
+                    if data is None or data.empty:
+                        st.error(f"获取 {data_source} 数据失败，请检查网络")
+                        return
+
+                if data_source != "演示数据":
+                    first_date = data.index[0].strftime('%Y-%m-%d')
+                    last_date = data.index[-1].strftime('%Y-%m-%d')
+                    st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+
+                start_dt = pd.Timestamp(backtest_start)
+                end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
+                data = data[(data.index >= start_dt) & (data.index < end_dt)]
+                if data.empty:
+                    st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
                     return
 
-            # 显示数据时间范围
-            if data_source != "演示数据":
-                first_date = data.index[0].strftime('%Y-%m-%d')
-                last_date = data.index[-1].strftime('%Y-%m-%d')
-                st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+            with st.spinner(f"运行「{strategy_name}」..."):
+                result = run_backtest(
+                    data, strat_info["class"], params,
+                    initial_cash=initial_cash,
+                    strategy_name=strategy_name,
+                )
 
-            # 按回测起始/结束日期切片
-            start_dt = pd.Timestamp(backtest_start)
-            end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
-            data = data[(data.index >= start_dt) & (data.index < end_dt)]
-            if data.empty:
-                st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据，请调整日期范围")
-                return
+            st.session_state.backtest_result = result
+            st.session_state.auto_zoom_pending = True
+            st.session_state.full_data = data
+            st.session_state.bp_params = params
+            st.session_state.bp_strat_class = strat_info["class"]
+            st.session_state.bp_strat_name = strategy_name
+            st.session_state.bp_cash = initial_cash
 
-        with st.spinner(f"运行「{strategy_name}」..."):
-            result = run_backtest(
-                data, strat_info["class"], params,
-                initial_cash=initial_cash,
-                strategy_name=strategy_name,
+        # ===== 渲染回测结果 =====
+        if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
+            st.info("点击「开始回测」查看结果")
+            return
+
+        result = st.session_state.backtest_result
+        st.divider()
+
+        m = result["metrics"]
+        mn1, mn2, mn3 = st.columns(3)
+        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+        mn2.metric("最大回撤", m["最大回撤"])
+        mn3.metric("夏普比率", m["夏普比率"])
+        mn4, mn5, mn6 = st.columns(3)
+        mn4.metric("胜率", m["胜率"])
+        mn5.metric("交易次数", m["交易次数"])
+        mn6.metric("最终资金", m["最终资金"])
+
+        st.divider()
+
+        explanation = result.get("explanation", {})
+        if explanation:
+            with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
+                st.markdown(render_strategy_card(strategy_name, explanation))
+
+        full_high = float(result["data"]["high"].max())
+        full_low = float(result["data"]["low"].min())
+        pad = (full_high - full_low) * 0.15
+        price_lo, price_hi = st.slider(
+            "纵轴（价格）范围",
+            min_value=float(int(full_low - pad)),
+            max_value=float(int(full_high + pad) + 1),
+            value=(full_low, full_high),
+            step=0.5,
+            key="price_slider",
+        )
+
+        # 自动判断：有 OHLC → K 线
+        chart_mode = "K线图"
+
+        fig = plot_backtest(
+            result["data"], result["strategy_name"],
+            chart_mode=chart_mode,
+            buy_points=result["buy_points"],
+            sell_points=result["sell_points"],
+            trades=result["trades"],
+            yaxis_range=(price_lo, price_hi),
+            theme=theme,
+        )
+
+        if "chart_version" not in st.session_state:
+            st.session_state.chart_version = 0
+
+        chart_html = _build_chart_html(
+            fig, version=st.session_state.chart_version, theme=theme,
+            auto_zoom=st.session_state.get("auto_zoom_pending", False),
+        )
+        st.session_state.auto_zoom_pending = False
+        st.components.v1.html(chart_html, height=780)
+
+        st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 双击空白 → 重置缩放 | Q=缩放 W=平移 E=全览")
+
+        if st.button("重置缩放", key="reset_zoom"):
+            st.session_state.chart_version += 1
+            st.rerun()
+
+        if result["trades"]:
+            st.subheader("交易明细")
+            trade_df = pd.DataFrame(result["trades"])
+            display_cols = [c for c in
+                            ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
+                            if c in trade_df.columns]
+            st.dataframe(
+                trade_df[display_cols],
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "买入价": st.column_config.NumberColumn(format="¥%.2f"),
+                    "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
+                }
             )
-
-        st.session_state.backtest_result = result
-        st.session_state.auto_zoom_pending = True
-        # 保存完整数据和参数，供回测后调整时间范围
-        st.session_state.full_data = data
-        st.session_state.bp_params = params
-        st.session_state.bp_strat_class = strat_info["class"]
-        st.session_state.bp_strat_name = strategy_name
-        st.session_state.bp_cash = initial_cash
-        st.session_state.bp_first_date = data.index[0].strftime('%Y-%m-%d')
-        st.session_state.bp_last_date = data.index[-1].strftime('%Y-%m-%d')
-        # 记录当前的活跃时间范围（用于检测用户是否调整了日期）
-        st.session_state.active_start = data.index[0].strftime('%Y-%m-%d')
-        st.session_state.active_end = data.index[-1].strftime('%Y-%m-%d')
-
-    # ========== 渲染结果 ==========
-    if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
-        st.info("点击「开始回测」查看结果")
+        else:
+            st.info("本次回测期间无交易记录")
         return
 
-    result = st.session_state.backtest_result
+    # ================================================================
+    #  模式 2：基金浏览
+    # ================================================================
+    st.subheader("基金净值浏览")
 
-    st.divider()
+    # ---- 基金搜索 ----
+    search_query = st.text_input(
+        "搜索基金（名称/代码/拼音）",
+        placeholder="例如：广发、011172、gflx、yfdl...",
+        key="fund_search",
+    )
+    candidates = search_funds(search_query)
 
-    # ===== 指标面板 =====
-    m = result["metrics"]
-    mn1, mn2, mn3 = st.columns(3)
-    mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    mn2.metric("最大回撤", m["最大回撤"])
-    mn3.metric("夏普比率", m["夏普比率"])
-    mn4, mn5, mn6 = st.columns(3)
-    mn4.metric("胜率", m["胜率"])
-    mn5.metric("交易次数", m["交易次数"])
-    mn6.metric("最终资金", m["最终资金"])
+    if not candidates:
+        st.warning("无匹配基金")
+        return
 
-    st.divider()
-
-    # ===== 策略大白话解释（可折叠） =====
-    explanation = result.get("explanation", {})
-    if explanation:
-        with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
-            st.markdown(render_strategy_card(strategy_name, explanation))
-
-    # ===== 回测后时间范围调整 =====
-    if "full_data" in st.session_state and st.session_state.full_data is not None:
-        fd = st.session_state.full_data
-        fd_first = pd.Timestamp(st.session_state.bp_first_date).to_pydatetime()
-        fd_last = pd.Timestamp(st.session_state.bp_last_date).to_pydatetime()
-        active_s = pd.Timestamp(st.session_state.active_start).to_pydatetime()
-        active_e = pd.Timestamp(st.session_state.active_end).to_pydatetime()
-
-        st.caption("调整数据时间范围，自动重新回测")
-        r1, r2 = st.columns([1, 1])
-        with r1:
-            range_start = st.date_input(
-                "起始", value=active_s, min_value=fd_first, max_value=fd_last,
-                key="range_start",
-            )
-        with r2:
-            range_end = st.date_input(
-                "结束", value=active_e, min_value=fd_first, max_value=fd_last,
-                key="range_end",
-            )
-        # 仅在用户调整了日期范围后才重新回测
-        cur_s = range_start.strftime('%Y-%m-%d')
-        cur_e = range_end.strftime('%Y-%m-%d')
-        if cur_s != st.session_state.active_start or cur_e != st.session_state.active_end:
-            range_s = pd.Timestamp(range_start)
-            range_e = pd.Timestamp(range_end) + pd.Timedelta(days=1)
-            sliced = fd[(fd.index >= range_s) & (fd.index < range_e)]
-            if sliced.empty:
-                st.warning("所选时间范围内无数据，请调整")
-            else:
-                new_result = run_backtest(
-                    sliced, st.session_state.bp_strat_class, st.session_state.bp_params,
-                    initial_cash=st.session_state.bp_cash,
-                    strategy_name=st.session_state.bp_strat_name,
-                )
-                st.session_state.backtest_result = new_result
-                st.session_state.active_start = cur_s
-                st.session_state.active_end = cur_e
-                st.session_state.auto_zoom_pending = True
-                st.rerun()
-
-    # ===== 纵轴范围滑块 =====
-    import numpy as np
-    full_high = float(result["data"]["high"].max())
-    full_low = float(result["data"]["low"].min())
-    pad = (full_high - full_low) * 0.15
-    price_lo, price_hi = st.slider(
-        "纵轴（价格）范围",
-        min_value=float(int(full_low - pad)),
-        max_value=float(int(full_high + pad) + 1),
-        value=(full_low, full_high),
-        step=0.5,
-        key="price_slider",
+    # 构建 selectbox 选项
+    candidate_labels = [f"{f['name']} ({f['code']})" for f in candidates]
+    # 默认选中第一个（广发利鑫 011172）
+    default_idx = 0
+    for i, f in enumerate(candidates):
+        if f["code"] == "011172":
+            default_idx = i
+            break
+    selected_label = st.selectbox(
+        "选择基金",
+        candidate_labels,
+        index=default_idx,
+        key="fund_select",
     )
 
-    # ===== Plotly 交互式图表（JS 客户端缩放，对齐 test_click.html 方案） =====
-    fig = plot_backtest(
-        result["data"],
-        result["strategy_name"],
-        chart_mode=chart_mode,
-        buy_points=result["buy_points"],
-        sell_points=result["sell_points"],
-        trades=result["trades"],
-        yaxis_range=(price_lo, price_hi),
-        theme=theme,
+    selected_idx = candidate_labels.index(selected_label)
+    fund = candidates[selected_idx]
+
+    # ---- 侧边栏基金信息 ----
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"""
+**基金名称**: {fund['name']}  
+**基金代码**: {fund['code']}  
+""")
+
+    # ---- 获取净值数据 ----
+    if "fund_data" not in st.session_state or st.session_state.get("fund_code") != fund["code"]:
+        with st.spinner(f"获取 {fund['name']} ({fund['code']}) 净值数据..."):
+            nav_df = get_fund_nav(fund["code"])
+        if nav_df is None or nav_df.empty:
+            st.error(f"获取 {fund['name']} 净值数据失败，请检查网络或代码是否正确")
+            return
+        st.session_state.fund_data = nav_df
+        st.session_state.fund_code = fund["code"]
+        st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
+
+    nav_df = st.session_state.fund_data
+    start_nav = nav_df["nav"].iloc[0]
+    latest_nav = nav_df["nav"].iloc[-1]
+    total_return = (latest_nav / start_nav - 1) * 100
+    date_start = nav_df["date"].iloc[0].strftime('%Y-%m-%d')
+    date_end = nav_df["date"].iloc[-1].strftime('%Y-%m-%d')
+
+    # ---- 指标 ----
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("最新净值", f"{latest_nav:.4f}")
+    mc2.metric("成立以来", f"{total_return:+.1f}%")
+    mc3.metric("数据范围", f"{date_start} ~ {date_end}")
+    mc4.metric("交易日数", str(len(nav_df)))
+
+    # ---- 净值折线图 ----
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=nav_df["date"], y=nav_df["nav"],
+        mode='lines', name='单位净值',
+        line=dict(color='#e7505a', width=2),
+        hovertemplate='%{{x|%Y-%m-%d}}<br>净值: %{{y:.4f}}<extra></extra>',
+    ))
+    fig.update_layout(
+        template='plotly_dark',
+        paper_bgcolor=BG, plot_bgcolor=BG,
+        font=dict(color=FG, size=11, family=CN_FONT),
+        title=dict(
+            text=f"<b>{fund['name']} ({fund['code']})</b> — 单位净值走势",
+            font=dict(color=FG, size=17, family=CN_FONT),
+            x=0.01, xanchor='left',
+        ),
+        height=650,
+        hovermode='closest',
+        showlegend=False,
+        margin=dict(l=60, r=30, t=55, b=40),
+        dragmode='pan',
+        clickmode='event',
+    )
+    fig.update_xaxes(
+        gridcolor=GRID_C, showgrid=True, zeroline=False,
+        linecolor=LINE_C, linewidth=1,
+        autorange=False,
+        title_font=dict(color=FG_SOFT, family=CN_FONT),
+        rangeslider=dict(
+            visible=True, thickness=0.06,
+            bgcolor='#1c1f2e', bordercolor=GRID_C, borderwidth=1,
+        ),
+    )
+    fig.update_yaxes(
+        title_text='单位净值 (元)',
+        gridcolor=GRID_C, showgrid=True, zeroline=False,
+        linecolor=LINE_C, linewidth=1,
+        title_font=dict(color=FG_SOFT, size=10, family=CN_FONT),
+        fixedrange=False,
     )
 
-    if "chart_version" not in st.session_state:
-        st.session_state.chart_version = 0
+    if "fund_chart_version" not in st.session_state:
+        st.session_state.fund_chart_version = 0
 
     chart_html = _build_chart_html(
-        fig, version=st.session_state.chart_version, theme=theme,
-        auto_zoom=st.session_state.get("auto_zoom_pending", False),
+        fig, version=st.session_state.fund_chart_version, theme=theme,
     )
-    st.session_state.auto_zoom_pending = False
-    st.components.v1.html(chart_html, height=780)
+    st.components.v1.html(chart_html, height=730)
 
-    st.caption("提示：点击任意 K 线 → 放大前后约一个月 | 工具栏框选 → 精确区间 | 双击空白 → 重置缩放")
+    st.caption("提示：点击折线 → 放大前后约 60 个数据点 | 双击空白 → 重置缩放 | Q=缩放 W=平移 E=全览")
 
-    # ===== 重置缩放按钮 =====
-    if st.button("重置缩放", key="reset_zoom"):
-        st.session_state.chart_version += 1
+    if st.button("重置缩放", key="fund_reset_zoom"):
+        st.session_state.fund_chart_version += 1
         st.rerun()
-
-    # ===== 交易明细 =====
-    if result["trades"]:
-        st.subheader("交易明细")
-        trade_df = pd.DataFrame(result["trades"])
-        display_cols = [c for c in ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"] if c in trade_df.columns]
-        st.dataframe(
-            trade_df[display_cols],
-            use_container_width=True, hide_index=True,
-            column_config={
-                "买入价": st.column_config.NumberColumn(format="¥%.2f"),
-                "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
-            }
-        )
-    else:
-        st.info("本次回测期间无交易记录")
