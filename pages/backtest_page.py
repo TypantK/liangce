@@ -431,10 +431,12 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 #  render()
 # ============================================================
 def render():
-    st.title("策略回测")
-
-    # ========== 侧边栏：主题 ==========
-    theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
+    # ========== 顶部栏：标题 + 主题切换 ==========
+    col_title, col_theme = st.columns([6, 1])
+    with col_title:
+        st.title("策略回测")
+    with col_theme:
+        theme_label = st.radio("主题", ["夜间", "白天"], key="theme", label_visibility="collapsed")
     theme = "dark" if theme_label == "夜间" else "light"
 
     if theme == "light":
