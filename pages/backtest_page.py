@@ -471,7 +471,11 @@ def render():
 #  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
 # ============================================================
 def _render_fund(item, theme):
-    """策略/参数/收益指标 → 侧边栏；净值图/交易明细 → 主区域"""
+    """收益指标置顶 → 策略/参数/收益指标 → 侧边栏；净值图/交易明细 → 主区域"""
+
+    # ---- 侧边栏顶部占位（回测后填入收益指标） ----
+    metrics_placeholder = st.sidebar.empty()
+
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
 
@@ -533,16 +537,17 @@ def _render_fund(item, theme):
         result = run_backtest(data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name)
 
-    # ---- 侧边栏：收益指标 ----
-    st.sidebar.divider()
-    st.sidebar.markdown("**收益指标**")
-    m = result["metrics"]
-    st.sidebar.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    st.sidebar.metric("最大回撤", m["最大回撤"])
-    st.sidebar.metric("夏普比率", m["夏普比率"])
-    st.sidebar.metric("胜率", m["胜率"])
-    st.sidebar.metric("交易次数", m["交易次数"])
-    st.sidebar.metric("最终资金", m["最终资金"])
+    # ---- 侧边栏顶部：收益指标 ----
+    with metrics_placeholder.container():
+        m = result["metrics"]
+        mn1, mn2, mn3 = st.columns(3)
+        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+        mn2.metric("最大回撤", m["最大回撤"])
+        mn3.metric("夏普比率", m["夏普比率"])
+        mn4, mn5, mn6 = st.columns(3)
+        mn4.metric("胜率", m["胜率"])
+        mn5.metric("交易次数", m["交易次数"])
+        mn6.metric("最终资金", m["最终资金"])
 
     # ======== 主区域：图表 + 明细 ========
     st.caption(
@@ -606,8 +611,11 @@ def _render_fund(item, theme):
 #  _render_backtest  — 股票回测（侧边栏参数 + 主区 K 线）
 # ============================================================
 def _render_backtest(item, theme):
-    """策略/参数/收益指标 → 侧边栏；K 线/交易明细 → 主区域"""
+    """收益指标置顶 → 策略/参数/收益指标 → 侧边栏；K 线/交易明细 → 主区域"""
     is_demo = item["type"] == "demo"
+
+    # ---- 侧边栏顶部占位（回测后填入收益指标） ----
+    metrics_placeholder = st.sidebar.empty()
 
     # ---- 侧边栏：标的标识 ----
     if not is_demo:
@@ -674,16 +682,17 @@ def _render_backtest(item, theme):
         result = run_backtest(data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name)
 
-    # ---- 侧边栏：收益指标 ----
-    st.sidebar.divider()
-    st.sidebar.markdown("**收益指标**")
-    m = result["metrics"]
-    st.sidebar.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    st.sidebar.metric("最大回撤", m["最大回撤"])
-    st.sidebar.metric("夏普比率", m["夏普比率"])
-    st.sidebar.metric("胜率", m["胜率"])
-    st.sidebar.metric("交易次数", m["交易次数"])
-    st.sidebar.metric("最终资金", m["最终资金"])
+    # ---- 侧边栏顶部：收益指标 ----
+    with metrics_placeholder.container():
+        m = result["metrics"]
+        mn1, mn2, mn3 = st.columns(3)
+        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+        mn2.metric("最大回撤", m["最大回撤"])
+        mn3.metric("夏普比率", m["夏普比率"])
+        mn4, mn5, mn6 = st.columns(3)
+        mn4.metric("胜率", m["胜率"])
+        mn5.metric("交易次数", m["交易次数"])
+        mn6.metric("最终资金", m["最终资金"])
 
     # ======== 主区域：K 线 + 明细 ========
     if is_demo:
