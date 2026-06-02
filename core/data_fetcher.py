@@ -300,8 +300,7 @@ def fund_nav_to_ohlcv(nav_df: pd.DataFrame) -> pd.DataFrame:
     # close = 当日净值
     df["close"] = df["nav"]
     # open = 前一日净值（首日与当日相同）
-    df["open"] = df["nav"].shift(1)
-    df["open"].fillna(df["nav"], inplace=True)
+    df["open"] = df["nav"].shift(1).fillna(df["nav"])
     # high / low = open 和 close 的较大/较小值
     df["high"] = df[["open", "close"]].max(axis=1)
     df["low"] = df[["open", "close"]].min(axis=1)
