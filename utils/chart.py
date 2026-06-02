@@ -403,9 +403,9 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
 
     # ---- 买卖点 scatter ----
     bp_idx = [dti[idx] for idx, _ in buy_points if idx < n]
-    bp_val = [p for idx, p in buy_points if idx < n]
+    bp_val = [float(df["close"].iloc[idx]) for idx, _ in buy_points if idx < n]
     sp_idx = [dti[idx] for idx, _ in sell_points if idx < n]
-    sp_val = [p for idx, p in sell_points if idx < n]
+    sp_val = [float(df["close"].iloc[idx]) for idx, _ in sell_points if idx < n]
 
     # ---- hover 浮窗 ----
     trade_by_entry = {}
