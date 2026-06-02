@@ -408,6 +408,16 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
                 if (zoomOutBtn) zoomOutBtn.click();
             }}, 150);
             if (dbg) {{ dbg.textContent = 'AUTOSCALE'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
+        }} else if (key === 'a') {{
+            e.preventDefault();
+            var zin = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="in"]');
+            if (zin) zin.click();
+            if (dbg) {{ dbg.textContent = 'ZOOM IN (A)'; setTimeout(function(){{dbg.textContent='...'}},800); }}
+        }} else if (key === 's') {{
+            e.preventDefault();
+            var zout = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+            if (zout) zout.click();
+            if (dbg) {{ dbg.textContent = 'ZOOM OUT (S)'; setTimeout(function(){{dbg.textContent='...'}},800); }}
         }}
     }});
 }})();
