@@ -195,6 +195,21 @@ def _try_ccxt_okx(symbol: str, start: str) -> pd.DataFrame:
     return df
 
 
+def _try_ccxt_gate(symbol: str, start: str) -> pd.DataFrame:
+    """加密货币 via Gate.io（国内可直连，无需翻墙）"""
+    import ccxt
+
+    ex = ccxt.gate({'enableRateLimit': True, 'timeout': 30000})
+    ohlcv = ex.fetch_ohlcv(symbol, "1d", since=ex.parse8601(start + "T00:00:00Z"), limit=1000)
+    if not ohlcv:
+        raise RuntimeError("Gate.io 返回空数据")
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('datetime', inplace=True)
+    df.drop('timestamp', axis=1, inplace=True)
+    return df
+
+
 def _try_ccxt_binance(symbol: str, start: str) -> pd.DataFrame:
     """加密货币 via Binance（备用，国内需翻墙）"""
     import ccxt
@@ -244,6 +259,7 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     elif symbol.endswith('USDT'):
         # ── 加密货币 ──────────────────────────────────────────────────────
         chain = [
+            ("ccxt+Gate.io", lambda: _try_ccxt_gate(symbol, start)),
             ("ccxt+OKX",     lambda: _try_ccxt_okx(symbol, start)),
             ("ccxt+Binance", lambda: _try_ccxt_binance(symbol, start)),
         ]

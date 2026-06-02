@@ -57,17 +57,17 @@ def _make_unified_pool():
     # 演示数据（始终第一位）
     py, pyf = _make_pinyin("演示数据")
     pool.append({"type": "demo", "code": "", "name": "演示数据",
-                 "pinyin": py, "pinyin_first": pyf, "search_tag": pyf[:2]})
+                 "pinyin": py, "pinyin_first": pyf})
     # 股票
     for name, code in STOCK_POOL.items():
         py, pyf = _make_pinyin(name)
         pool.append({"type": "stock", "code": code, "name": name,
-                     "pinyin": py, "pinyin_first": pyf, "search_tag": pyf[:2]})
+                     "pinyin": py, "pinyin_first": pyf})
     # 基金
     for code, name in _FUNDS_RAW:
         py, pyf = _make_pinyin(name)
         pool.append({"type": "fund", "code": code, "name": name,
-                     "pinyin": py, "pinyin_first": pyf, "search_tag": pyf[:2]})
+                     "pinyin": py, "pinyin_first": pyf})
     return pool
 
 
@@ -425,15 +425,14 @@ def render():
     theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
     theme = "dark" if theme_label == "夜间" else "light"
 
-    # ========== 统一数据源选择（键入即过滤，含拼音缩写） ==========
+    # ========== 统一数据源选择 ==========
     all_labels = []
     for it in UNIFIED_POOL:
         tag = TYPE_TAGS.get(it["type"], "?")
-        st = it.get("search_tag", "")
         if it["code"]:
-            all_labels.append(f"[{tag}] {it['name']} ({it['code']} {st})")
+            all_labels.append(f"[{tag}] {it['name']} ({it['code']})")
         else:
-            all_labels.append(f"[{tag}] {it['name']} ({st})")
+            all_labels.append(f"[{tag}] {it['name']}")
 
     # label → item 映射，避免 index 匹配
     label_map = dict(zip(all_labels, UNIFIED_POOL))
