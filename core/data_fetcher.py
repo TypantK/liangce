@@ -52,7 +52,12 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     wanted = [c for c in ('open', 'high', 'low', 'close', 'volume') if c in df.columns]
     if not wanted:
         raise ValueError("缺少必要的 OHLCV 数据列")
-    return df[wanted]
+    df = df[wanted]
+    # 强制转数值，防止数据源返回字符串导致 backtrader TypeError
+    for c in df.columns:
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+    df = df.dropna()
+    return df
 
 
 # ── open-stock-data ───────────────────────────────────────────────────────
