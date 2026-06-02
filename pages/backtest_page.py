@@ -519,6 +519,19 @@ def render():
         </style>
         """, unsafe_allow_html=True)
 
+    # ---- 侧边栏指标列自适应宽度 ----
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        min-width: 105px !important;
+        flex: 1 1 auto !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # ========== 统一数据源选择 ==========
     all_labels = []
     for it in UNIFIED_POOL:
