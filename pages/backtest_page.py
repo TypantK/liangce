@@ -456,24 +456,160 @@ def render():
 
 
 # ============================================================
-#  _render_fund  — 基金净值折线图
+#  _render_fund  — 基金策略回测
 # ============================================================
 def _render_fund(item, theme):
-    """选中基金 → 获取净值 → 红色折线图"""
+    """选中基金 → 获取净值 → 策略回测 → 净值折线图 + 买卖信号"""
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
 
-    if "fund_data" not in st.session_state or st.session_state.get("fund_code") != item["code"]:
+    # 切换基金时清除旧回测结果
+    if st.session_state.get("fund_code") != item["code"]:
+        st.session_state.fund_backtest_result = None
+        st.session_state.fund_code = item["code"]
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        strategy_name = st.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="fund_s")
+    with c2:
+        st.info(f"📊 {item['name']}  ({item['code']})")
+
+    c4, c5 = st.columns([1, 1])
+    with c4:
+        backtest_start = st.date_input(
+            "回测起始日期", value=datetime.now() - timedelta(days=365 * 3),
+            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_start",
+        )
+    with c5:
+        backtest_end = st.date_input(
+            "回测结束日期", value=datetime.now(),
+            min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_end",
+        )
+
+    initial_cash = st.number_input("初始资金（元）", 1000, 10000000, 100000, 10000, key="fund_cash")
+
+    strat_info = STRATEGY_REGISTRY[strategy_name]
+    st.caption(strat_info["desc"])
+
+    params = {}
+    labels = strat_info.get("param_labels", {})
+    pcols = st.columns(len(strat_info["params"]))
+    for i, (pn, (pmin, pmax, pdef)) in enumerate(strat_info["params"].items()):
+        with pcols[i]:
+            step = 0.1 if isinstance(pdef, float) else 1
+            label = labels.get(pn, pn)
+            params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
+
+    if st.button("开始回测", type="primary", use_container_width=True, key="fund_btn"):
+        with st.spinner(f"获取 {item['name']} ({item['code']}) 净值数据..."):
+            nav_df = get_fund_nav(item["code"])
+            if nav_df is None or nav_df.empty:
+                st.error(f"获取 {item['name']} 净值数据失败")
+                return
+            data = fund_nav_to_ohlcv(nav_df)
+
+            first_date = data.index[0].strftime('%Y-%m-%d')
+            last_date = data.index[-1].strftime('%Y-%m-%d')
+            st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+
+            start_dt = pd.Timestamp(backtest_start)
+            end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
+            data = data[(data.index >= start_dt) & (data.index < end_dt)]
+            if data.empty:
+                st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
+                return
+
+        with st.spinner(f"运行「{strategy_name}」..."):
+            result = run_backtest(data, strat_info["class"], params,
+                                  initial_cash=initial_cash, strategy_name=strategy_name)
+
+        st.session_state.fund_backtest_result = result
+        st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
+
+    if "fund_backtest_result" not in st.session_state or st.session_state.fund_backtest_result is None:
+        _render_fund_preview(item, theme)
+        return
+
+    result = st.session_state.fund_backtest_result
+    st.divider()
+
+    m = result["metrics"]
+    mn1, mn2, mn3 = st.columns(3)
+    mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    mn2.metric("最大回撤", m["最大回撤"])
+    mn3.metric("夏普比率", m["夏普比率"])
+    mn4, mn5, mn6 = st.columns(3)
+    mn4.metric("胜率", m["胜率"])
+    mn5.metric("交易次数", m["交易次数"])
+    mn6.metric("最终资金", m["最终资金"])
+
+    st.divider()
+
+    explanation = result.get("explanation", {})
+    if explanation:
+        with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
+            st.markdown(render_strategy_card(strategy_name, explanation))
+
+    full_high = float(result["data"]["close"].max())
+    full_low = float(result["data"]["close"].min())
+    pad = (full_high - full_low) * 0.15
+    price_lo, price_hi = st.slider(
+        "纵轴（净值）范围",
+        min_value=round(full_low - pad, 4),
+        max_value=round(full_high + pad, 4),
+        value=(round(full_low, 4), round(full_high, 4)), step=0.0001, key="fund_price_slider",
+    )
+
+    fig = plot_fund_backtest(
+        result["data"], result["strategy_name"],
+        buy_points=result["buy_points"], sell_points=result["sell_points"],
+        trades=result["trades"], yaxis_range=(price_lo, price_hi), theme=theme,
+    )
+
+    if "fund_chart_version" not in st.session_state:
+        st.session_state.fund_chart_version = 0
+
+    chart_html = _build_chart_html(
+        fig, version=st.session_state.fund_chart_version, theme=theme,
+        auto_zoom=False,
+    )
+    st.components.v1.html(chart_html, height=730)
+    st.caption("点击折线放大 | 双击重置 | Q=缩放 W=平移 E=全览")
+
+    if st.button("重置缩放", key="fund_reset_zoom"):
+        st.session_state.fund_chart_version += 1
+        st.rerun()
+
+    if result["trades"]:
+        st.subheader("交易明细")
+        trade_df = pd.DataFrame(result["trades"])
+        display_cols = [c for c in
+                        ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
+                        if c in trade_df.columns]
+        st.dataframe(
+            trade_df[display_cols], use_container_width=True, hide_index=True,
+            column_config={
+                "买入价": st.column_config.NumberColumn(format="%.4f"),
+                "卖出价": st.column_config.NumberColumn(format="%.4f"),
+            }
+        )
+    else:
+        st.info("本次回测期间无交易记录")
+
+
+def _render_fund_preview(item, theme):
+    """基金净值预览折线图（回测前展示，保留旧的净值走势）"""
+    if "fund_preview_data" not in st.session_state or st.session_state.get("fund_preview_code") != item["code"]:
         with st.spinner(f"获取 {item['name']} ({item['code']}) 净值数据..."):
             nav_df = get_fund_nav(item["code"])
         if nav_df is None or nav_df.empty:
             st.error(f"获取 {item['name']} 净值数据失败")
             return
-        st.session_state.fund_data = nav_df
-        st.session_state.fund_code = item["code"]
-        st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
+        st.session_state.fund_preview_data = nav_df
+        st.session_state.fund_preview_code = item["code"]
+        st.session_state.fund_preview_chart_version = st.session_state.get("fund_preview_chart_version", 0) + 1
 
-    nav_df = st.session_state.fund_data
+    nav_df = st.session_state.fund_preview_data
     start_nav = nav_df["nav"].iloc[0]
     latest_nav = nav_df["nav"].iloc[-1]
     total_return = (latest_nav / start_nav - 1) * 100
@@ -491,7 +627,7 @@ def _render_fund(item, theme):
         x=nav_df["date"], y=nav_df["nav"],
         mode='lines', name='单位净值',
         line=dict(color='#e7505a', width=2),
-        hovertemplate='%{{x|%Y-%m-%d}}<br>净值: %{{y:.4f}}<extra></extra>',
+        hovertemplate='%{x|%Y-%m-%d}<br>净值: %{y:.4f}<extra></extra>',
     ))
     fig.update_layout(
         template='plotly_dark',
@@ -521,16 +657,18 @@ def _render_fund(item, theme):
         fixedrange=False,
     )
 
-    if "fund_chart_version" not in st.session_state:
-        st.session_state.fund_chart_version = 0
+    if "fund_preview_chart_version" not in st.session_state:
+        st.session_state.fund_preview_chart_version = 0
 
-    chart_html = _build_chart_html(fig, version=st.session_state.fund_chart_version, theme=theme)
+    chart_html = _build_chart_html(fig, version=st.session_state.fund_preview_chart_version, theme=theme)
     st.components.v1.html(chart_html, height=730)
     st.caption("Q=缩放  W=平移  E=全览 | 点击折线放大 | 双击重置")
 
-    if st.button("重置缩放", key="fund_reset_zoom"):
-        st.session_state.fund_chart_version += 1
+    if st.button("重置缩放", key="fund_preview_reset_zoom"):
+        st.session_state.fund_preview_chart_version += 1
         st.rerun()
+
+    st.info("👆 选择策略并配置参数后，点击「开始回测」查看量化策略表现")
 
 
 # ============================================================
