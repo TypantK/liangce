@@ -4,6 +4,7 @@
 支持 A 股 / 美股 / 加密货币，每条路径均有 fallback 链，国内网络无需翻墙。
 """
 
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 from typing import Optional
@@ -213,17 +214,23 @@ def _try_ccxt_binance(symbol: str, start: str) -> pd.DataFrame:
 #  公开 API
 # ---------------------------------------------------------------------------
 
-def get_stock_data(symbol: str, start: str = "2024-01-01", end: str = "2025-12-31",
+def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] = None,
                    freq: str = "1d") -> Optional[pd.DataFrame]:
     """
     获取真实股票数据（多源自动降级）。
 
-    A 股 (.SZ/.SH)：open-stock-data → akshare
+    A 股 (.SZ/.SH)：open-stock-data → baostock 直连 → akshare
     加密货币 (USDT)：ccxt+OKX → ccxt+Binance
     美股 (其他)：    open-stock-data → akshare 美股接口
 
     国内网络无需翻墙即可获取 A 股和美股数据。
+
+    start / end 默认为最近一年至今。
     """
+    if end is None:
+        end = datetime.now().strftime('%Y-%m-%d')
+    if start is None:
+        start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
     if symbol.endswith(('.SZ', '.SH')):
         # ── A 股 ──────────────────────────────────────────────────────────
         market = "sh" if symbol.endswith('.SH') else "sz"

@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime, timedelta
 from core.strategies import STRATEGY_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data
 from core.engine import run_backtest
@@ -401,7 +402,18 @@ def render():
     with c3:
         chart_mode = st.radio("图表类型", ["K线图", "折线图"], horizontal=True, key="cm")
 
-    initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
+    # 回测起始日期
+    c4, c5 = st.columns([1, 1])
+    with c4:
+        backtest_start = st.date_input(
+            "回测起始日期",
+            value=datetime.now() - timedelta(days=365),
+            min_value=datetime(2000, 1, 1),
+            max_value=datetime.now(),
+            key="bs_start",
+        )
+    with c5:
+        initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
 
     strat_info = STRATEGY_REGISTRY[strategy_name]
     st.caption(strat_info["desc"])
@@ -426,6 +438,19 @@ def render():
                 if data is None or data.empty:
                     st.error(f"获取 {data_source} 数据失败，请检查网络")
                     return
+
+            # 显示数据时间范围
+            if data_source != "演示数据":
+                first_date = data.index[0].strftime('%Y-%m-%d')
+                last_date = data.index[-1].strftime('%Y-%m-%d')
+                st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+
+            # 按回测起始日期切片
+            start_dt = pd.Timestamp(backtest_start)
+            data = data[data.index >= start_dt]
+            if data.empty:
+                st.warning(f"回测起始日期 {backtest_start} 之后无可用数据，请调早起始日期")
+                return
 
         with st.spinner(f"运行「{strategy_name}」..."):
             result = run_backtest(
