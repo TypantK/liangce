@@ -437,6 +437,20 @@ def render():
     theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
     theme = "dark" if theme_label == "夜间" else "light"
 
+    if theme == "light":
+        st.markdown("""
+        <style>
+        [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: #ffffff !important; }
+        [data-testid="stSidebar"] { background: #f8f9fa !important; }
+        [data-testid="stSidebar"] * { color: #1f2937 !important; }
+        .stApp { background: #ffffff !important; }
+        h1, h2, h3, p, label, .stMarkdown, .stRadio label, .stSelectbox label,
+        .stDateInput label, .stNumberInput label, .stSlider label,
+        [data-testid="stMetricValue"], .stDataFrame { color: #1f2937 !important; }
+        section[data-testid="stSidebar"] .stRadio label { color: #1f2937 !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
     # ========== 统一数据源选择 ==========
     all_labels = []
     for it in UNIFIED_POOL:
