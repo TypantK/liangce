@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from core.strategies import STRATEGY_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data, fund_nav_to_ohlcv
@@ -54,10 +53,6 @@ def _make_pinyin(name):
 def _make_unified_pool():
     """构建统一数据池：演示数据 + 股票 + 基金"""
     pool = []
-    # 演示数据（始终第一位）
-    py, pyf = _make_pinyin("演示数据")
-    pool.append({"type": "demo", "code": "", "name": "演示数据",
-                 "pinyin": py, "pinyin_first": pyf})
     # 股票
     for name, code in STOCK_POOL.items():
         py, pyf = _make_pinyin(name)
@@ -112,7 +107,14 @@ def _build_chart_html(fig, version=0, theme="dark", auto_zoom=False):
     fig_html = fig.to_html(
         include_plotlyjs='cdn',
         full_html=False,
-        config={'doubleClick': 'reset', 'displayModeBar': True, 'displaylogo': False},
+        config={
+            'doubleClick': 'reset',
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtons': [
+                ['zoom2d', 'pan2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d'],
+            ],
+        },
         div_id=chart_id,
     )
 
@@ -526,7 +528,7 @@ def _render_fund(item, theme):
         st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
 
     if "fund_backtest_result" not in st.session_state or st.session_state.fund_backtest_result is None:
-        _render_fund_preview(item, theme)
+        st.info("点击「开始回测」查看结果")
         return
 
     result = st.session_state.fund_backtest_result
@@ -541,6 +543,8 @@ def _render_fund(item, theme):
     mn4.metric("胜率", m["胜率"])
     mn5.metric("交易次数", m["交易次数"])
     mn6.metric("最终资金", m["最终资金"])
+    mn7, mn8, mn9 = st.columns(3)
+    mn7.metric("年化收益率", m.get("年化收益率", "N/A"))
 
     st.divider()
 
@@ -596,80 +600,6 @@ def _render_fund(item, theme):
         st.info("本次回测期间无交易记录")
 
 
-def _render_fund_preview(item, theme):
-    """基金净值预览折线图（回测前展示，保留旧的净值走势）"""
-    if "fund_preview_data" not in st.session_state or st.session_state.get("fund_preview_code") != item["code"]:
-        with st.spinner(f"获取 {item['name']} ({item['code']}) 净值数据..."):
-            nav_df = get_fund_nav(item["code"])
-        if nav_df is None or nav_df.empty:
-            st.error(f"获取 {item['name']} 净值数据失败")
-            return
-        st.session_state.fund_preview_data = nav_df
-        st.session_state.fund_preview_code = item["code"]
-        st.session_state.fund_preview_chart_version = st.session_state.get("fund_preview_chart_version", 0) + 1
-
-    nav_df = st.session_state.fund_preview_data
-    start_nav = nav_df["nav"].iloc[0]
-    latest_nav = nav_df["nav"].iloc[-1]
-    total_return = (latest_nav / start_nav - 1) * 100
-    date_start = nav_df["date"].iloc[0].strftime('%Y-%m-%d')
-    date_end = nav_df["date"].iloc[-1].strftime('%Y-%m-%d')
-
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    mc1.metric("最新净值", f"{latest_nav:.4f}")
-    mc2.metric("成立以来", f"{total_return:+.1f}%")
-    mc3.metric("数据范围", f"{date_start} ~ {date_end}")
-    mc4.metric("交易日数", str(len(nav_df)))
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=nav_df["date"], y=nav_df["nav"],
-        mode='lines', name='单位净值',
-        line=dict(color='#e7505a', width=2),
-        hovertemplate='%{x|%Y-%m-%d}<br>净值: %{y:.4f}<extra></extra>',
-    ))
-    fig.update_layout(
-        template='plotly_dark',
-        paper_bgcolor=BG, plot_bgcolor=BG,
-        font=dict(color=FG, size=11, family=CN_FONT),
-        title=dict(
-            text=f"<b>{item['name']} ({item['code']})</b> — 单位净值走势",
-            font=dict(color=FG, size=17, family=CN_FONT),
-            x=0.01, xanchor='left',
-        ),
-        height=650, hovermode='closest', showlegend=False,
-        margin=dict(l=60, r=30, t=55, b=40),
-        dragmode='pan', clickmode='event',
-    )
-    fig.update_xaxes(
-        gridcolor=GRID_C, showgrid=True, zeroline=False,
-        linecolor=LINE_C, linewidth=1, autorange=False,
-        title_font=dict(color=FG_SOFT, family=CN_FONT),
-        rangeslider=dict(visible=True, thickness=0.06,
-                         bgcolor='#1c1f2e', bordercolor=GRID_C, borderwidth=1),
-    )
-    fig.update_yaxes(
-        title_text='单位净值 (元)',
-        gridcolor=GRID_C, showgrid=True, zeroline=False,
-        linecolor=LINE_C, linewidth=1,
-        title_font=dict(color=FG_SOFT, size=10, family=CN_FONT),
-        fixedrange=False,
-    )
-
-    if "fund_preview_chart_version" not in st.session_state:
-        st.session_state.fund_preview_chart_version = 0
-
-    chart_html = _build_chart_html(fig, version=st.session_state.fund_preview_chart_version, theme=theme)
-    st.components.v1.html(chart_html, height=730)
-    st.caption("Q=缩放  W=平移  E=全览 | 点击折线放大 | 双击重置")
-
-    if st.button("重置缩放", key="fund_preview_reset_zoom"):
-        st.session_state.fund_preview_chart_version += 1
-        st.rerun()
-
-    st.info("👆 选择策略并配置参数后，点击「开始回测」查看量化策略表现")
-
-
 # ============================================================
 #  _render_backtest  — 股票回测（演示 / 真实）
 # ============================================================
@@ -715,18 +645,14 @@ def _render_backtest(item, theme):
     if st.button("开始回测", type="primary", use_container_width=True):
         st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
         with st.spinner("获取数据..."):
-            if is_demo:
-                data = generate_demo_data(300)
-            else:
-                data = get_stock_data(item["code"])
-                if data is None or data.empty:
-                    st.error(f"获取 {item['name']} 数据失败")
-                    return
+            data = get_stock_data(item["code"])
+            if data is None or data.empty:
+                st.error(f"获取 {item['name']} 数据失败")
+                return
 
-            if not is_demo:
-                first_date = data.index[0].strftime('%Y-%m-%d')
-                last_date = data.index[-1].strftime('%Y-%m-%d')
-                st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+            first_date = data.index[0].strftime('%Y-%m-%d')
+            last_date = data.index[-1].strftime('%Y-%m-%d')
+            st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
 
             start_dt = pd.Timestamp(backtest_start)
             end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
@@ -763,6 +689,8 @@ def _render_backtest(item, theme):
     mn4.metric("胜率", m["胜率"])
     mn5.metric("交易次数", m["交易次数"])
     mn6.metric("最终资金", m["最终资金"])
+    mn7, mn8, mn9 = st.columns(3)
+    mn7.metric("年化收益率", m.get("年化收益率", "N/A"))
 
     st.divider()
 

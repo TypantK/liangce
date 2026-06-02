@@ -137,6 +137,13 @@ def run_backtest(data, strategy_class, strategy_params,
     total_return = (final_value - initial_cash) / initial_cash * 100
     buy_hold = (data['close'].iloc[-1] - data['close'].iloc[0]) / data['close'].iloc[0] * 100
 
+    # 年化收益率 = (最终净值 / 初始净值)^(365 / 回测天数) - 1
+    backtest_days = (data.index[-1] - data.index[0]).days
+    if backtest_days > 0:
+        annualized_return = ((final_value / initial_cash) ** (365 / backtest_days) - 1) * 100
+    else:
+        annualized_return = 0.0
+
     ret = strat.analyzers.returns.get_analysis()
     sharpe = strat.analyzers.sharpe.get_analysis()
     dd = strat.analyzers.drawdown.get_analysis()
@@ -147,6 +154,7 @@ def run_backtest(data, strategy_class, strategy_params,
         "总收益率": f"{total_return:+.2f}%",
         "买入持有": f"{buy_hold:+.2f}%",
         "超额收益": f"{total_return - buy_hold:+.2f}%",
+        "年化收益率": f"{annualized_return:+.2f}%",
         "最大回撤": f"{dd['max']['drawdown']:.2f}%" if 'max' in dd else "N/A",
     }
     sr = sharpe.get('sharperatio')
