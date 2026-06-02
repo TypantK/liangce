@@ -75,19 +75,6 @@ UNIFIED_POOL = _make_unified_pool()
 TYPE_TAGS = {"demo": "演示", "stock": "股票", "fund": "基金"}
 
 
-def search_data_source(query):
-    """统一搜索：拼音/中文/代码，匹配所有数据源"""
-    if not query or not query.strip():
-        return UNIFIED_POOL
-    q = query.strip().lower()
-    results = []
-    for item in UNIFIED_POOL:
-        if (q in item["code"].lower() or q in item["name"].lower() or
-                q in item["pinyin"] or q in item["pinyin_first"]):
-            results.append(item)
-    return results
-
-
 def get_fund_nav(code):
     """通过 akshare 获取基金净值历史"""
     try:
@@ -438,37 +425,25 @@ def render():
     theme_label = st.sidebar.radio("主题", ["夜间", "白天"], key="theme")
     theme = "dark" if theme_label == "夜间" else "light"
 
-    # ========== 统一数据源搜索 & 选择 ==========
-    search_query = st.text_input(
-        "搜索数据源（名称 / 代码 / 拼音）",
-        placeholder="例如：茅台、011172、gflx、比亚迪、演示...",
-        key="unified_search",
-    )
-    candidates = search_data_source(search_query)
-
-    if not candidates:
-        st.warning("无匹配数据源")
-        return
-
-    # 构建带类型标签的选择列表
-    candidate_labels = []
-    for it in candidates:
+    # ========== 统一数据源选择（键入即过滤） ==========
+    all_labels = []
+    for it in UNIFIED_POOL:
         tag = TYPE_TAGS.get(it["type"], "?")
         if it["code"]:
-            candidate_labels.append(f"{it['name']}  [{tag}]  {it['code']}")
+            all_labels.append(f"[{tag}] {it['name']} ({it['code']})")
         else:
-            candidate_labels.append(f"{it['name']}  [{tag}]")
+            all_labels.append(f"[{tag}] {it['name']}")
 
     # 默认选中演示数据
     default_idx = 0
-    for i, it in enumerate(candidates):
+    for i, it in enumerate(UNIFIED_POOL):
         if it["type"] == "demo":
             default_idx = i
             break
 
-    selected_label = st.selectbox("数据源", candidate_labels, index=default_idx, key="ds_select")
-    selected_idx = candidate_labels.index(selected_label)
-    item = candidates[selected_idx]
+    selected_label = st.selectbox("数据源", all_labels, index=default_idx, key="ds_select")
+    selected_idx = all_labels.index(selected_label)
+    item = UNIFIED_POOL[selected_idx]
 
     # ========== 按类型分支 ==========
     if item["type"] == "fund":
