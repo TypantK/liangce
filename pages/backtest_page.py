@@ -402,7 +402,7 @@ def render():
     with c3:
         chart_mode = st.radio("图表类型", ["K线图", "折线图"], horizontal=True, key="cm")
 
-    # 回测起始日期
+    # 回测起始 / 结束日期
     c4, c5 = st.columns([1, 1])
     with c4:
         backtest_start = st.date_input(
@@ -413,7 +413,15 @@ def render():
             key="bs_start",
         )
     with c5:
-        initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
+        backtest_end = st.date_input(
+            "回测结束日期",
+            value=datetime.now(),
+            min_value=datetime(2000, 1, 1),
+            max_value=datetime.now(),
+            key="bs_end",
+        )
+
+    initial_cash = st.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
 
     strat_info = STRATEGY_REGISTRY[strategy_name]
     st.caption(strat_info["desc"])
@@ -445,11 +453,12 @@ def render():
                 last_date = data.index[-1].strftime('%Y-%m-%d')
                 st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
 
-            # 按回测起始日期切片
+            # 按回测起始/结束日期切片
             start_dt = pd.Timestamp(backtest_start)
-            data = data[data.index >= start_dt]
+            end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
+            data = data[(data.index >= start_dt) & (data.index < end_dt)]
             if data.empty:
-                st.warning(f"回测起始日期 {backtest_start} 之后无可用数据，请调早起始日期")
+                st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据，请调整日期范围")
                 return
 
         with st.spinner(f"运行「{strategy_name}」..."):
@@ -461,6 +470,17 @@ def render():
 
         st.session_state.backtest_result = result
         st.session_state.auto_zoom_pending = True
+        # 保存完整数据和参数，供回测后调整时间范围
+        st.session_state.full_data = data
+        st.session_state.bp_params = params
+        st.session_state.bp_strat_class = strat_info["class"]
+        st.session_state.bp_strat_name = strategy_name
+        st.session_state.bp_cash = initial_cash
+        st.session_state.bp_first_date = data.index[0].strftime('%Y-%m-%d')
+        st.session_state.bp_last_date = data.index[-1].strftime('%Y-%m-%d')
+        # 记录当前的活跃时间范围（用于检测用户是否调整了日期）
+        st.session_state.active_start = data.index[0].strftime('%Y-%m-%d')
+        st.session_state.active_end = data.index[-1].strftime('%Y-%m-%d')
 
     # ========== 渲染结果 ==========
     if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
@@ -489,6 +509,47 @@ def render():
     if explanation:
         with st.expander(f"「{strategy_name}」大白话解释", expanded=False):
             st.markdown(render_strategy_card(strategy_name, explanation))
+
+    # ===== 回测后时间范围调整 =====
+    if "full_data" in st.session_state and st.session_state.full_data is not None:
+        fd = st.session_state.full_data
+        fd_first = pd.Timestamp(st.session_state.bp_first_date).to_pydatetime()
+        fd_last = pd.Timestamp(st.session_state.bp_last_date).to_pydatetime()
+        active_s = pd.Timestamp(st.session_state.active_start).to_pydatetime()
+        active_e = pd.Timestamp(st.session_state.active_end).to_pydatetime()
+
+        st.caption("调整数据时间范围，自动重新回测")
+        r1, r2 = st.columns([1, 1])
+        with r1:
+            range_start = st.date_input(
+                "起始", value=active_s, min_value=fd_first, max_value=fd_last,
+                key="range_start",
+            )
+        with r2:
+            range_end = st.date_input(
+                "结束", value=active_e, min_value=fd_first, max_value=fd_last,
+                key="range_end",
+            )
+        # 仅在用户调整了日期范围后才重新回测
+        cur_s = range_start.strftime('%Y-%m-%d')
+        cur_e = range_end.strftime('%Y-%m-%d')
+        if cur_s != st.session_state.active_start or cur_e != st.session_state.active_end:
+            range_s = pd.Timestamp(range_start)
+            range_e = pd.Timestamp(range_end) + pd.Timedelta(days=1)
+            sliced = fd[(fd.index >= range_s) & (fd.index < range_e)]
+            if sliced.empty:
+                st.warning("所选时间范围内无数据，请调整")
+            else:
+                new_result = run_backtest(
+                    sliced, st.session_state.bp_strat_class, st.session_state.bp_params,
+                    initial_cash=st.session_state.bp_cash,
+                    strategy_name=st.session_state.bp_strat_name,
+                )
+                st.session_state.backtest_result = new_result
+                st.session_state.active_start = cur_s
+                st.session_state.active_end = cur_e
+                st.session_state.auto_zoom_pending = True
+                st.rerun()
 
     # ===== 纵轴范围滑块 =====
     import numpy as np
