@@ -467,17 +467,13 @@ def render():
 
 
 # ============================================================
-#  _render_fund  — 基金策略回测
+# ============================================================
+#  _render_fund  — 基金策略回测（参数即变即跑）
 # ============================================================
 def _render_fund(item, theme):
     """选中基金 → 获取净值 → 策略回测 → 净值折线图 + 买卖信号"""
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
-
-    # 切换基金时清除旧回测结果
-    if st.session_state.get("fund_code") != item["code"]:
-        st.session_state.fund_backtest_result = None
-        st.session_state.fund_code = item["code"]
 
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -511,39 +507,46 @@ def _render_fund(item, theme):
             label = labels.get(pn, pn)
             params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
 
-    if st.button("开始回测", type="primary", use_container_width=True, key="fund_btn"):
+    # ---- 净值数据获取（缓存，仅切换基金时重新拉取） ----
+    nav_cache_key = f"fund_nav_{item['code']}"
+    if nav_cache_key not in st.session_state:
         with st.spinner(f"获取 {item['name']} ({item['code']}) 净值数据..."):
             nav_df = get_fund_nav(item["code"])
-            if nav_df is None or nav_df.empty:
-                st.error(f"获取 {item['name']} 净值数据失败")
-                return
-            data = fund_nav_to_ohlcv(nav_df)
+        if nav_df is None or nav_df.empty:
+            st.error(f"获取 {item['name']} 净值数据失败")
+            return
+        st.session_state[nav_cache_key] = nav_df
 
-            first_date = data.index[0].strftime('%Y-%m-%d')
-            last_date = data.index[-1].strftime('%Y-%m-%d')
-            st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
+    nav_df = st.session_state[nav_cache_key]
+    full_data = fund_nav_to_ohlcv(nav_df)
 
-            start_dt = pd.Timestamp(backtest_start)
-            end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
-            data = data[(data.index >= start_dt) & (data.index < end_dt)]
-            if data.empty:
-                st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
-                return
-
-        with st.spinner(f"运行「{strategy_name}」..."):
-            result = run_backtest(data, strat_info["class"], params,
-                                  initial_cash=initial_cash, strategy_name=strategy_name)
-
-        st.session_state.fund_backtest_result = result
-        st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
-
-    if "fund_backtest_result" not in st.session_state or st.session_state.fund_backtest_result is None:
-        st.info("点击「开始回测」查看结果")
+    # ---- 日期过滤 ----
+    start_dt = pd.Timestamp(backtest_start)
+    end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
+    data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
+    if data.empty:
+        st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
         return
 
-    result = st.session_state.fund_backtest_result
+    st.caption(
+        f"全量数据：{full_data.index[0].strftime('%Y-%m-%d')} ~ {full_data.index[-1].strftime('%Y-%m-%d')}"
+        f"，共 {len(full_data)} 日 | 回测区间 {len(data)} 日"
+    )
+
+    # ---- 参数指纹 → 图表版本 ----
+    fp = f"{strategy_name}|{sorted(params.items())}|{backtest_start}|{backtest_end}|{initial_cash}"
+    if st.session_state.get("_fund_fp") != fp:
+        st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
+        st.session_state["_fund_fp"] = fp
+
+    # ---- 运行回测 ----
+    with st.spinner(f"运行「{strategy_name}」..."):
+        result = run_backtest(data, strat_info["class"], params,
+                              initial_cash=initial_cash, strategy_name=strategy_name)
+
     st.divider()
 
+    # ---- 指标卡片 ----
     m = result["metrics"]
     mn1, mn2, mn3 = st.columns(3)
     mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
@@ -553,8 +556,6 @@ def _render_fund(item, theme):
     mn4.metric("胜率", m["胜率"])
     mn5.metric("交易次数", m["交易次数"])
     mn6.metric("最终资金", m["最终资金"])
-    mn7, mn8, mn9 = st.columns(3)
-    mn7.metric("年化收益率", m.get("年化收益率", "N/A"))
 
     st.divider()
 
@@ -611,7 +612,7 @@ def _render_fund(item, theme):
 
 
 # ============================================================
-#  _render_backtest  — 股票回测（演示 / 真实）
+#  _render_backtest  — 股票回测（参数即变即跑）
 # ============================================================
 def _render_backtest(item, theme):
     """选中股票/演示 → 策略回测 → K 线"""
@@ -652,44 +653,47 @@ def _render_backtest(item, theme):
             label = labels.get(pn, pn)
             params[pn] = st.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
 
-    if st.button("开始回测", type="primary", use_container_width=True):
-        st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
-        with st.spinner("获取数据..."):
-            data = get_stock_data(item["code"])
-            if data is None or data.empty:
+    # ---- 数据获取（缓存，仅切换标的时重新拉取） ----
+    if is_demo:
+        data = generate_demo_data(300)
+        st.caption("演示数据（模拟走势）")
+    else:
+        stock_cache_key = f"stock_data_{item['code']}"
+        if stock_cache_key not in st.session_state:
+            with st.spinner(f"获取 {item['name']} ({item['code']}) 数据..."):
+                raw = get_stock_data(item["code"])
+            if raw is None or raw.empty:
                 st.error(f"获取 {item['name']} 数据失败")
                 return
+            st.session_state[stock_cache_key] = raw
+        data = st.session_state[stock_cache_key]
+        st.caption(
+            f"数据范围：{data.index[0].strftime('%Y-%m-%d')} ~ {data.index[-1].strftime('%Y-%m-%d')}"
+            f"，共 {len(data)} 个交易日"
+        )
 
-            first_date = data.index[0].strftime('%Y-%m-%d')
-            last_date = data.index[-1].strftime('%Y-%m-%d')
-            st.info(f"数据范围：{first_date} ~ {last_date}，共 {len(data)} 个交易日")
-
-            start_dt = pd.Timestamp(backtest_start)
-            end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
-            data = data[(data.index >= start_dt) & (data.index < end_dt)]
-            if data.empty:
-                st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
-                return
-
-        with st.spinner(f"运行「{strategy_name}」..."):
-            result = run_backtest(data, strat_info["class"], params,
-                                  initial_cash=initial_cash, strategy_name=strategy_name)
-
-        st.session_state.backtest_result = result
-        st.session_state.auto_zoom_pending = True
-        st.session_state.full_data = data
-        st.session_state.bp_params = params
-        st.session_state.bp_strat_class = strat_info["class"]
-        st.session_state.bp_strat_name = strategy_name
-        st.session_state.bp_cash = initial_cash
-
-    if "backtest_result" not in st.session_state or st.session_state.backtest_result is None:
-        st.info("点击「开始回测」查看结果")
+    # ---- 日期过滤 ----
+    start_dt = pd.Timestamp(backtest_start)
+    end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
+    data = data[(data.index >= start_dt) & (data.index < end_dt)]
+    if data.empty:
+        st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
         return
 
-    result = st.session_state.backtest_result
+    # ---- 参数指纹 → 图表版本 ----
+    fp = f"{strategy_name}|{sorted(params.items())}|{backtest_start}|{backtest_end}|{initial_cash}"
+    if st.session_state.get("_stock_fp") != fp:
+        st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
+        st.session_state["_stock_fp"] = fp
+
+    # ---- 运行回测 ----
+    with st.spinner(f"运行「{strategy_name}」..."):
+        result = run_backtest(data, strat_info["class"], params,
+                              initial_cash=initial_cash, strategy_name=strategy_name)
+
     st.divider()
 
+    # ---- 指标卡片 ----
     m = result["metrics"]
     mn1, mn2, mn3 = st.columns(3)
     mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
@@ -699,8 +703,6 @@ def _render_backtest(item, theme):
     mn4.metric("胜率", m["胜率"])
     mn5.metric("交易次数", m["交易次数"])
     mn6.metric("最终资金", m["最终资金"])
-    mn7, mn8, mn9 = st.columns(3)
-    mn7.metric("年化收益率", m.get("年化收益率", "N/A"))
 
     st.divider()
 
@@ -730,9 +732,8 @@ def _render_backtest(item, theme):
 
     chart_html = _build_chart_html(
         fig, version=st.session_state.chart_version, theme=theme,
-        auto_zoom=st.session_state.get("auto_zoom_pending", False),
+        auto_zoom=False,
     )
-    st.session_state.auto_zoom_pending = False
     st.components.v1.html(chart_html, height=780)
     st.caption("点击 K 线 → 放大 60 天 | 双击空白 → 重置 | Q=缩放 W=平移 E=全览")
 
