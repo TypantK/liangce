@@ -622,14 +622,15 @@ def _render_fund(item, theme):
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
         m = result["metrics"]
-        mn1, mn2, mn3 = st.columns(3)
-        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        mn2.metric("最大回撤", m["最大回撤"])
-        mn3.metric("夏普比率", m["夏普比率"])
-        mn4, mn5, mn6 = st.columns(3)
-        mn4.metric("胜率", m["胜率"])
-        mn5.metric("交易次数", m["交易次数"])
-        mn6.metric("最终资金", m["最终资金"])
+        c1, c2 = st.columns(2)
+        c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+        c2.metric("最大回撤", m["最大回撤"])
+        c3, c4 = st.columns(2)
+        c3.metric("夏普比率", m["夏普比率"])
+        c4.metric("胜率", m["胜率"])
+        c5, c6 = st.columns(2)
+        c5.metric("交易次数", m["交易次数"])
+        c6.metric("最终资金", m["最终资金"])
 
     # ======== 主区域：图表 + 明细 ========
     st.caption(
@@ -767,14 +768,15 @@ def _render_backtest(item, theme):
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
         m = result["metrics"]
-        mn1, mn2, mn3 = st.columns(3)
-        mn1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        mn2.metric("最大回撤", m["最大回撤"])
-        mn3.metric("夏普比率", m["夏普比率"])
-        mn4, mn5, mn6 = st.columns(3)
-        mn4.metric("胜率", m["胜率"])
-        mn5.metric("交易次数", m["交易次数"])
-        mn6.metric("最终资金", m["最终资金"])
+        c1, c2 = st.columns(2)
+        c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+        c2.metric("最大回撤", m["最大回撤"])
+        c3, c4 = st.columns(2)
+        c3.metric("夏普比率", m["夏普比率"])
+        c4.metric("胜率", m["胜率"])
+        c5, c6 = st.columns(2)
+        c5.metric("交易次数", m["交易次数"])
+        c6.metric("最终资金", m["最终资金"])
 
     # ======== 主区域：K 线 + 明细 ========
     if is_demo:
