@@ -532,6 +532,21 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
             ),
         ))
 
+    # 最新净值标记（大圆点）
+    latest_close = float(df["close"].iloc[-1])
+    latest_date = dti[-1]
+    fig.add_trace(go.Scatter(
+        x=[latest_date], y=[latest_close], name="最新净值",
+        mode="markers",
+        marker=dict(
+            symbol="circle", size=12,
+            color="#ffdd57",
+            line=dict(color="white", width=2),
+        ),
+        hovertemplate=f"{latest_date.strftime('%Y-%m-%d')}<br>最新净值: {latest_close:.4f}<extra></extra>",
+        showlegend=True,
+    ))
+
     fig.update_layout(
         template=_template,
         paper_bgcolor=_bg, plot_bgcolor=_bg,
