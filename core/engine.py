@@ -219,4 +219,11 @@ def run_backtest(data, strategy_class, strategy_params,
         "buy_points": buy_pts, "sell_points": sell_pts,
         "strategy_name": strategy_name,
         "explanation": STRATEGY_EXPLANATIONS.get(strategy_name, {}),
+        "raw": {
+            "total_return": total_return,
+            "annualized_return": annualized_return,
+            "sharpe": sr,
+            "win_rate": (won / n * 100) if n > 0 else None,
+            "max_drawdown": dd['max']['drawdown'] if 'max' in dd else None,
+        },
     }

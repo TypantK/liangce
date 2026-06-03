@@ -15,6 +15,7 @@ st.set_page_config(page_title="量策", page_icon="📊", layout="wide")
 # ====================== 页面路由 ======================
 PAGES = {
     "策略回测": "pages.backtest_page",
+    "参数优化": "pages.optimize_page",
     "关于": "pages.about_page",
 }
 
