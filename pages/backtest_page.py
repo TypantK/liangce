@@ -553,15 +553,21 @@ def render():
         </style>
         """, unsafe_allow_html=True)
 
-    # ---- 侧边栏指标列自适应宽度 ----
+    # ---- 侧边栏指标列自适应宽度 + 防截断 ----
     st.markdown("""
     <style>
     section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
         flex-wrap: wrap !important;
     }
     section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        min-width: 105px !important;
+        min-width: 110px !important;
         flex: 1 1 auto !important;
+    }
+    /* 指标数值禁止截断 */
+    section[data-testid="stSidebar"] [data-testid="stMetricValue"] {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
     }
     </style>
     """, unsafe_allow_html=True)

@@ -218,6 +218,17 @@ def render():
 
     # ---- 最优参数 ----
     st.subheader("最优参数组合")
+
+    # 指标数值禁止截断
+    st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     bp = result["best_params"]
     bm = result["best_metric"]
     bl = result["best_metric_label"]
