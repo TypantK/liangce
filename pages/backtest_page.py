@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from core.strategies import STRATEGY_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data, fund_nav_to_ohlcv
 from core.engine import run_backtest
+from core.sentiment import parse_events_from_search
+from core.sentiment_fetcher import fetch_news
 from utils.chart import plot_backtest, render_strategy_card, plot_fund_backtest
 
 
@@ -636,9 +638,37 @@ def _render_fund(item, theme):
     params = {}
     labels = strat_info.get("param_labels", {})
     for pn, (pmin, pmax, pdef) in strat_info["params"].items():
-        step = 0.1 if isinstance(pdef, float) else 1
         label = labels.get(pn, pn)
-        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
+        if pn == "position_pct":
+            params[pn] = st.sidebar.slider(
+                label, pmin, pmax, pdef, 0.05, key=f"fund_p_{pn}",
+                format_func=lambda v: f"{int(v*100)}%",
+            )
+        else:
+            step = 0.1 if isinstance(pdef, float) else 1
+            params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
+
+    # ---- 侧边栏：情绪模式 ----
+    st.sidebar.markdown("**情绪增强**")
+    sentiment_mode = st.sidebar.checkbox(
+        "情绪模式",
+        value=False,
+        help="开启后实时抓取市场新闻，根据情绪得分过滤交易信号：利好时正常交易，利空时暂停入场",
+        key="fund_sentiment",
+    )
+    sentiment_events = None
+    if sentiment_mode:
+        with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
+            try:
+                raw_news = fetch_news(item["name"], max_results=6)
+                sentiment_events = parse_events_from_search(raw_news, item["name"])
+                if sentiment_events:
+                    st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件")
+                else:
+                    st.sidebar.warning("未获取到相关新闻")
+            except Exception:
+                st.sidebar.warning("新闻抓取失败，已关闭情绪模式")
+                sentiment_mode = False
 
     # ---- 净值数据获取（缓存，仅切换基金时重新拉取） ----
     nav_cache_key = f"fund_nav_{item['code']}"
@@ -671,7 +701,8 @@ def _render_fund(item, theme):
     with st.spinner(f"运行「{strategy_name}」..."):
         result = run_backtest(full_data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name,
-                              trade_start=start_dt, trade_end=end_dt)
+                              trade_start=start_dt, trade_end=end_dt,
+                              sentiment_events=sentiment_events)
 
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
@@ -733,9 +764,14 @@ def _render_fund(item, theme):
     if result["trades"]:
         st.subheader("交易明细")
         trade_df = pd.DataFrame(result["trades"])
-        display_cols = [c for c in
-                        ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
-                        if c in trade_df.columns]
+        base_cols = ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
+        # 情绪模式 → 追加情绪事件列
+        if sentiment_mode and sentiment_events:
+            if "买入情绪事件" in trade_df.columns and trade_df["买入情绪事件"].str.strip().str.len().gt(0).any():
+                base_cols.insert(base_cols.index("买入原因") + 1, "买入情绪事件")
+            if "卖出情绪事件" in trade_df.columns and trade_df["卖出情绪事件"].str.strip().str.len().gt(0).any():
+                base_cols.insert(base_cols.index("卖出原因") + 1, "卖出情绪事件")
+        display_cols = [c for c in base_cols if c in trade_df.columns]
         st.dataframe(
             trade_df[display_cols], use_container_width=True, hide_index=True,
             column_config={
@@ -832,9 +868,37 @@ def _render_backtest(item, theme):
     params = {}
     labels = strat_info.get("param_labels", {})
     for pn, (pmin, pmax, pdef) in strat_info["params"].items():
-        step = 0.1 if isinstance(pdef, float) else 1
         label = labels.get(pn, pn)
-        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+        if pn == "position_pct":
+            params[pn] = st.sidebar.slider(
+                label, pmin, pmax, pdef, 0.05, key=f"p_{pn}",
+                format_func=lambda v: f"{int(v*100)}%",
+            )
+        else:
+            step = 0.1 if isinstance(pdef, float) else 1
+            params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+
+    # ---- 侧边栏：情绪模式 ----
+    st.sidebar.markdown("**情绪增强**")
+    sentiment_mode = st.sidebar.checkbox(
+        "情绪模式",
+        value=False,
+        help="开启后实时抓取市场新闻，根据情绪得分过滤交易信号：利好时正常交易，利空时暂停入场",
+        key="stock_sentiment",
+    )
+    sentiment_events = None
+    if sentiment_mode:
+        with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
+            try:
+                raw_news = fetch_news(item["name"], max_results=6)
+                sentiment_events = parse_events_from_search(raw_news, item["name"])
+                if sentiment_events:
+                    st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件")
+                else:
+                    st.sidebar.warning("未获取到相关新闻")
+            except Exception:
+                st.sidebar.warning("新闻抓取失败，已关闭情绪模式")
+                sentiment_mode = False
 
     # ---- 数据获取（缓存，仅切换标的时重新拉取） ----
     if is_demo:
@@ -868,7 +932,8 @@ def _render_backtest(item, theme):
     with st.spinner(f"运行「{strategy_name}」..."):
         result = run_backtest(full_data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name,
-                              trade_start=start_dt, trade_end=end_dt)
+                              trade_start=start_dt, trade_end=end_dt,
+                              sentiment_events=sentiment_events)
 
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
@@ -933,9 +998,14 @@ def _render_backtest(item, theme):
     if result["trades"]:
         st.subheader("交易明细")
         trade_df = pd.DataFrame(result["trades"])
-        display_cols = [c for c in
-                        ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
-                        if c in trade_df.columns]
+        base_cols = ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
+        # 情绪模式 → 追加情绪事件列
+        if sentiment_mode and sentiment_events:
+            if "买入情绪事件" in trade_df.columns and trade_df["买入情绪事件"].str.strip().str.len().gt(0).any():
+                base_cols.insert(base_cols.index("买入原因") + 1, "买入情绪事件")
+            if "卖出情绪事件" in trade_df.columns and trade_df["卖出情绪事件"].str.strip().str.len().gt(0).any():
+                base_cols.insert(base_cols.index("卖出原因") + 1, "卖出情绪事件")
+        display_cols = [c for c in base_cols if c in trade_df.columns]
         st.dataframe(
             trade_df[display_cols], use_container_width=True, hide_index=True,
             column_config={

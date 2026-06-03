@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-回测引擎 v2 — 增加策略名称和触发原因捕获
+回测引擎 v3 — 策略名称 + 触发原因 + 情绪模式过滤
 """
 
 import sys
@@ -9,6 +9,8 @@ import pandas as pd
 import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
+
+from core.sentiment import get_sentiment_for_date, format_sentiment_tag
 
 # ---- 各策略的人话解释 ----
 STRATEGY_EXPLANATIONS = {
@@ -48,10 +50,16 @@ TRIGGER_MAP = {
     "RSI 超买超卖": {"buy": "RSI 跌破超卖线", "sell_default": "RSI 升破超买线", "sell_trail": "触发跟踪止损"},
     "MACD 策略": {"buy": "MACD 金叉", "sell_default": "MACD 死叉", "sell_sl": "触发止损"},
     "布林带策略": {"buy": "价格触及布林带下轨", "sell_default": "价格回归布林中轨", "sell_sl": "触发止损"},
+    "卡尔曼滤波趋势": {"buy": "滤波趋势向上且价格突破上轨", "sell_default": "滤波趋势转下跌", "sell_sl": "触发止损"},
+    "HMA 低延迟均线": {"buy": "HMA 金叉信号", "sell_default": "HMA 死叉信号", "sell_sl": "触发止损"},
+    "线性回归斜率": {"buy": "回归斜率向上且突破信号线", "sell_default": "斜率转负", "sell_sl": "触发止损"},
+    "一目均衡表": {"buy": "云层之上且转上行 → 做多", "sell_default": "价格跌破云层", "sell_sl": "触发止损"},
 }
 
 
-def _make_logged_strategy(base_class, strategy_name):
+def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
+    """创建带日志的策略类。sentiment_events 为 [(date, score, title), ...]"""
+
     class LoggedStrategy(base_class):
         params = (
             ('trade_start', None),
@@ -63,10 +71,21 @@ def _make_logged_strategy(base_class, strategy_name):
             self._trade_log = []
             self._open_info = {}
             self._strategy_name = strategy_name
+            self._sentiment_events = sentiment_events or []
+
+        def _check_sentiment(self, dt_str):
+            """返回 (分数, 标签, 新闻列表)"""
+            if not self._sentiment_events:
+                return 0.0, "", []
+            score, headlines = get_sentiment_for_date(
+                self._sentiment_events, dt_str, window_days=7)
+            tag = format_sentiment_tag(score)
+            return score, tag, headlines
 
         def next(self):
             dt = self.datas[0].datetime.date(0)
             dt_ts = pd.Timestamp(dt)
+            dt_str = dt_ts.strftime("%Y-%m-%d")
 
             # 交易窗口之前：只积累指标，不下单
             if self.p.trade_start is not None and dt_ts < self.p.trade_start:
@@ -76,6 +95,17 @@ def _make_logged_strategy(base_class, strategy_name):
                 if self.position:
                     self.close()
                 return
+
+            # --- 情绪模式：检查市场情绪，影响入场决策 ---
+            if self._sentiment_events:
+                sent_score, sent_tag, sent_news = self._check_sentiment(dt_str)
+                # 利空情绪 → 暂停买入（不执行 super().next()，策略不会下单）
+                if sent_score < 0:
+                    return
+                # 极端利空 → 强制平仓
+                if sent_score < -3 and self.position:
+                    self.close()
+                    return
 
             super().next()
 
@@ -104,11 +134,32 @@ def _make_logged_strategy(base_class, strategy_name):
                     elif pnl_pct > 3.5 and strategy_name == "双均线交叉":
                         exit_reason = TRIGGER_MAP[strategy_name]["sell_tp"]
 
+                # 情绪事件：查找买入/卖出日期附近的新闻
+                entry_news = ""
+                exit_news = ""
+                if self._sentiment_events:
+                    try:
+                        entry_date = trade.data.datetime.date(info['baropen']).strftime("%Y-%m-%d")
+                        _, _, eh = self._check_sentiment(entry_date)
+                        if eh:
+                            entry_news = " | ".join(eh[:3])
+                    except Exception:
+                        pass
+                    try:
+                        exit_date = trade.data.datetime.date(trade.barclose).strftime("%Y-%m-%d")
+                        _, _, xh = self._check_sentiment(exit_date)
+                        if xh:
+                            exit_news = " | ".join(xh[:3])
+                    except Exception:
+                        pass
+
                 self._trade_log.append({
                     'baropen': info['baropen'], 'barclose': trade.barclose,
                     'entry': trade.price, 'exit': exit_p, 'pnl': trade.pnl,
                     'entry_reason': entry_reason, 'exit_reason': exit_reason,
+                    'entry_news': entry_news, 'exit_news': exit_news,
                 })
+
     # 让 backtrader 在 sys.modules 中找到策略类的模块
     import inspect, importlib
     mod = inspect.getmodule(base_class)
@@ -134,11 +185,19 @@ def _make_logged_strategy(base_class, strategy_name):
 
 def run_backtest(data, strategy_class, strategy_params,
                  initial_cash=100000, commission=0.0005,
-                 strategy_name="", trade_start=None, trade_end=None):
+                 strategy_name="", trade_start=None, trade_end=None,
+                 sentiment_events=None):
+    """
+    运行回测。
+
+    sentiment_events: 可选，情绪事件列表 [(date_str, score, title), ...]
+                      开启后，利空日暂停买入，极端利空强制平仓。
+    """
     # 统一列名为小写（兼容 yfinance 大写列名）
     data = data.rename(columns=str.lower).copy()
     data.columns = [c.lower() for c in data.columns]
-    LoggedCls = _make_logged_strategy(strategy_class, strategy_name)
+    LoggedCls = _make_logged_strategy(strategy_class, strategy_name,
+                                      sentiment_events=sentiment_events)
 
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(initial_cash)
@@ -203,19 +262,9 @@ def run_backtest(data, strategy_class, strategy_params,
             "卖出价": round(tl['exit'], 2),
             "卖出原因": tl.get('exit_reason', ''),
             "盈亏": f"{tl['pnl']:+.2f}",
+            "买入情绪事件": tl.get('entry_news', ''),
+            "卖出情绪事件": tl.get('exit_news', ''),
         })
-
-    # 将 buy/sell 索引从全量 data 空间重新映射到 trade_data 空间
-    # （trade_data 可能是 data 的子集，直接使用原索引会导致图表标记错位）
-    if trade_start is not None and trade_end is not None:
-        buy_pts = [
-            (trade_data.index.get_loc(data.index[bi]), entry)
-            for bi, entry in buy_pts
-        ]
-        sell_pts = [
-            (trade_data.index.get_loc(data.index[si]), exit_p)
-            for si, exit_p in sell_pts
-        ]
 
     n = len(trades)
     if n > 0:

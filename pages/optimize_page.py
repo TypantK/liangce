@@ -127,8 +127,8 @@ def render():
     p1_min, p1_max, p1_def = strat_info["params"][p1_name]
     p2_min, p2_max, p2_def = strat_info["params"][p2_name]
 
-    p1_step = 0.1 if isinstance(p1_def, float) else 1
-    p2_step = 0.1 if isinstance(p2_def, float) else 1
+    p1_step = 0.05 if p1_name == "position_pct" else (0.1 if isinstance(p1_def, float) else 1)
+    p2_step = 0.05 if p2_name == "position_pct" else (0.1 if isinstance(p2_def, float) else 1)
 
     st.sidebar.markdown("---")
     st.sidebar.caption(param_labels.get(p1_name, p1_name))

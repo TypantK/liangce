@@ -119,6 +119,7 @@ class DualMAStrategy(bt.Strategy):
         ('slow', 20),
         ('stop_loss', 2.0),
         ('take_profit', 5.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -137,7 +138,7 @@ class DualMAStrategy(bt.Strategy):
             return
         if not self.position:
             if self.crossover > 0:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.entry_price = self.data.close[0]
         else:
@@ -156,6 +157,7 @@ class RSIStrategy(bt.Strategy):
         ('oversold', 35),
         ('overbought', 65),
         ('trailing_stop', 3.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -172,7 +174,7 @@ class RSIStrategy(bt.Strategy):
             return
         if not self.position:
             if self.rsi < self.params.oversold:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.highest = self.data.close[0]
         else:
@@ -192,6 +194,7 @@ class MACDStrategy(bt.Strategy):
         ('macd_slow', 26),
         ('macd_signal', 9),
         ('stop_loss', 3.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -214,7 +217,7 @@ class MACDStrategy(bt.Strategy):
             return
         if not self.position:
             if self.crossover > 0:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.entry_price = self.data.close[0]
         else:
@@ -232,6 +235,7 @@ class BollingerStrategy(bt.Strategy):
         ('period', 20),
         ('devfactor', 2.0),
         ('stop_loss', 2.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -252,7 +256,7 @@ class BollingerStrategy(bt.Strategy):
             return
         if not self.position:
             if self.data.close[0] <= self.boll.lines.bot:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.entry_price = self.data.close[0]
         else:
@@ -276,6 +280,7 @@ class KalmanTrendStrategy(bt.Strategy):
         ('process_noise', 1e-4),
         ('measurement_noise', 1e-1),
         ('trail_percent', 4.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -299,7 +304,7 @@ class KalmanTrendStrategy(bt.Strategy):
         vel = self.kf_velocity[0]
         if not self.position:
             if vel > 0:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.highest = self.data.close[0]
         else:
@@ -322,6 +327,7 @@ class HMAStrategy(bt.Strategy):
         ('hma_period', 20),
         ('signal_period', 9),
         ('stop_loss', 3.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -342,7 +348,7 @@ class HMAStrategy(bt.Strategy):
             return
         if not self.position:
             if self.crossover > 0:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.entry_price = self.data.close[0]
         else:
@@ -366,6 +372,7 @@ class LinearRegressionSlopeStrategy(bt.Strategy):
         ('lr_period', 20),
         ('smooth_period', 5),
         ('stop_loss', 3.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -384,7 +391,7 @@ class LinearRegressionSlopeStrategy(bt.Strategy):
         slope = self.slope_smooth[0]
         if not self.position:
             if slope > 0:
-                size = self.broker.getcash() * 0.95 / self.data.close[0]
+                size = self.broker.getcash() * self.params.position_pct / self.data.close[0]
                 self.order = self.buy(size=size)
                 self.entry_price = self.data.close[0]
         else:
@@ -411,6 +418,7 @@ class IchimokuStrategy(bt.Strategy):
         ('kijun', 26),
         ('senkou', 52),
         ('stop_loss', 4.0),
+        ('position_pct', 0.95),
     )
 
     def __init__(self):
@@ -445,7 +453,7 @@ class IchimokuStrategy(bt.Strategy):
         if not self.position:
             # 价格在云上方 且 Tenkan 上穿 Kijun → 做多
             if current_close > cloud_top and tenkan_cross_up:
-                size = self.broker.getcash() * 0.95 / current_close
+                size = self.broker.getcash() * self.params.position_pct / current_close
                 self.order = self.buy(size=size)
                 self.entry_price = current_close
         else:
@@ -465,33 +473,41 @@ STRATEGY_REGISTRY = {
     "双均线交叉": {
         "class": DualMAStrategy,
         "params": {"fast": (3, 15, 5), "slow": (10, 60, 20),
-                    "stop_loss": (0.5, 5.0, 2.0), "take_profit": (1.0, 10.0, 5.0)},
+                    "stop_loss": (0.5, 5.0, 2.0), "take_profit": (1.0, 10.0, 5.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"fast": "快线周期（天）", "slow": "慢线周期（天）",
-                         "stop_loss": "止损线（%）", "take_profit": "止盈线（%）"},
+                         "stop_loss": "止损线（%）", "take_profit": "止盈线（%）",
+                         "position_pct": "仓位比例"},
         "desc": "快线（SMA）上穿慢线买入，下穿/止盈/止损卖出。适合趋势行情。"
     },
     "RSI 超买超卖": {
         "class": RSIStrategy,
         "params": {"rsi_period": (7, 28, 14), "oversold": (20, 40, 35),
-                    "overbought": (60, 80, 65), "trailing_stop": (1.0, 8.0, 3.0)},
+                    "overbought": (60, 80, 65), "trailing_stop": (1.0, 8.0, 3.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"rsi_period": "RSI 周期（天）", "oversold": "超卖线",
-                         "overbought": "超买线", "trailing_stop": "跟踪止损（%）"},
+                         "overbought": "超买线", "trailing_stop": "跟踪止损（%）",
+                         "position_pct": "仓位比例"},
         "desc": "RSI 低于超卖线买入，高于超买线或触发跟踪止损卖出。适合震荡行情。"
     },
     "MACD 策略": {
         "class": MACDStrategy,
         "params": {"macd_fast": (8, 20, 12), "macd_slow": (20, 40, 26),
-                    "macd_signal": (5, 15, 9), "stop_loss": (1.0, 8.0, 3.0)},
+                    "macd_signal": (5, 15, 9), "stop_loss": (1.0, 8.0, 3.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"macd_fast": "快线周期", "macd_slow": "慢线周期",
-                         "macd_signal": "信号线周期", "stop_loss": "止损线（%）"},
+                         "macd_signal": "信号线周期", "stop_loss": "止损线（%）",
+                         "position_pct": "仓位比例"},
         "desc": "MACD 金叉买入、死叉卖出，带固定止损。趋势跟踪经典策略。"
     },
     "布林带策略": {
         "class": BollingerStrategy,
         "params": {"period": (10, 40, 20), "devfactor": (1.5, 3.0, 2.0),
-                    "stop_loss": (1.0, 5.0, 2.0)},
+                    "stop_loss": (1.0, 5.0, 2.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"period": "布林带周期（天）", "devfactor": "标准差倍数",
-                         "stop_loss": "止损线（%）"},
+                         "stop_loss": "止损线（%）",
+                         "position_pct": "仓位比例"},
         "desc": "价格触及布林带下轨买入，回归中轨卖出。适合均值回归行情。"
     },
     # ---- 预测型策略 ----
@@ -499,34 +515,42 @@ STRATEGY_REGISTRY = {
         "class": KalmanTrendStrategy,
         "params": {"process_noise": (1e-6, 1e-2, 1e-4),
                     "measurement_noise": (1e-3, 1.0, 1e-1),
-                    "trail_percent": (1.0, 8.0, 4.0)},
+                    "trail_percent": (1.0, 8.0, 4.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"process_noise": "过程噪声 Q",
                          "measurement_noise": "测量噪声 R",
-                         "trail_percent": "跟踪止损（%）"},
+                         "trail_percent": "跟踪止损（%）",
+                         "position_pct": "仓位比例"},
         "desc": "卡尔曼滤波估计隐藏价格速度，速度>0做多，速度<0平仓。从噪声中推断趋势方向，具有前瞻性。"
     },
     "HMA 低延迟均线": {
         "class": HMAStrategy,
         "params": {"hma_period": (10, 40, 20), "signal_period": (5, 20, 9),
-                    "stop_loss": (1.0, 8.0, 3.0)},
+                    "stop_loss": (1.0, 8.0, 3.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"hma_period": "HMA 周期", "signal_period": "信号线周期",
-                         "stop_loss": "止损线（%）"},
+                         "stop_loss": "止损线（%）",
+                         "position_pct": "仓位比例"},
         "desc": "Hull Moving Average 大幅减少滞后，配合 EMA 信号线交叉。比传统均线更早捕捉拐点。"
     },
     "线性回归斜率": {
         "class": LinearRegressionSlopeStrategy,
         "params": {"lr_period": (10, 40, 20), "smooth_period": (3, 15, 5),
-                    "stop_loss": (1.0, 8.0, 3.0)},
+                    "stop_loss": (1.0, 8.0, 3.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"lr_period": "回归周期（天）", "smooth_period": "平滑周期",
-                         "stop_loss": "止损线（%）"},
+                         "stop_loss": "止损线（%）",
+                         "position_pct": "仓位比例"},
         "desc": "对价格拟合回归直线，斜率作为领先指标。斜率>0做多，<0平仓。提前反映趋势加速度。"
     },
     "一目均衡表": {
         "class": IchimokuStrategy,
         "params": {"tenkan": (7, 15, 9), "kijun": (20, 40, 26),
-                    "senkou": (40, 65, 52), "stop_loss": (2.0, 10.0, 4.0)},
+                    "senkou": (40, 65, 52), "stop_loss": (2.0, 10.0, 4.0),
+                    "position_pct": (0.1, 1.0, 0.95)},
         "param_labels": {"tenkan": "转换线周期", "kijun": "基准线周期",
-                         "senkou": "先行带周期", "stop_loss": "止损线（%）"},
+                         "senkou": "先行带周期", "stop_loss": "止损线（%）",
+                         "position_pct": "仓位比例"},
         "desc": "云层投影到未来 26 期形成前瞻参考。价格在云上做多，跌破云底平仓。独特的预测性指标。"
     },
 }
