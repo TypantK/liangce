@@ -644,6 +644,9 @@ def _render_fund(item, theme):
         c5, c6 = st.columns(2)
         c5.metric("交易次数", m["交易次数"])
         c6.metric("最终资金", m["最终资金"])
+        c7, c8 = st.columns(2)
+        c7.metric("年化收益率", m["年化收益率"])
+        c8.metric("买入持有", m["买入持有"])
 
     # ======== 主区域：图表 + 明细 ========
     st.caption(
@@ -790,6 +793,9 @@ def _render_backtest(item, theme):
         c5, c6 = st.columns(2)
         c5.metric("交易次数", m["交易次数"])
         c6.metric("最终资金", m["最终资金"])
+        c7, c8 = st.columns(2)
+        c7.metric("年化收益率", m["年化收益率"])
+        c8.metric("买入持有", m["买入持有"])
 
     # ======== 主区域：K 线 + 明细 ========
     if is_demo:
