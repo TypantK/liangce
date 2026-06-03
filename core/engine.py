@@ -205,6 +205,18 @@ def run_backtest(data, strategy_class, strategy_params,
             "盈亏": f"{tl['pnl']:+.2f}",
         })
 
+    # 将 buy/sell 索引从全量 data 空间重新映射到 trade_data 空间
+    # （trade_data 可能是 data 的子集，直接使用原索引会导致图表标记错位）
+    if trade_start is not None and trade_end is not None:
+        buy_pts = [
+            (trade_data.index.get_loc(data.index[bi]), entry)
+            for bi, entry in buy_pts
+        ]
+        sell_pts = [
+            (trade_data.index.get_loc(data.index[si]), exit_p)
+            for si, exit_p in sell_pts
+        ]
+
     n = len(trades)
     if n > 0:
         won = sum(1 for tl in trade_log if tl['pnl'] > 0)
