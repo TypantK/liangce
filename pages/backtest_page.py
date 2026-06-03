@@ -636,11 +636,11 @@ def _render_fund(item, theme):
     nav_df = st.session_state[nav_cache_key]
     full_data = fund_nav_to_ohlcv(nav_df)
 
-    # ---- 日期过滤 ----
+    # ---- 交易窗口检查 ----
     start_dt = pd.Timestamp(backtest_start)
     end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
-    data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
-    if data.empty:
+    trade_check = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
+    if trade_check.empty:
         st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
         return
 
@@ -650,10 +650,11 @@ def _render_fund(item, theme):
         st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
         st.session_state["_fund_fp"] = fp
 
-    # ---- 运行回测 ----
+    # ---- 运行回测（全量数据供指标预热，交易窗口限制实际下单） ----
     with st.spinner(f"运行「{strategy_name}」..."):
-        result = run_backtest(data, strat_info["class"], params,
-                              initial_cash=initial_cash, strategy_name=strategy_name)
+        result = run_backtest(full_data, strat_info["class"], params,
+                              initial_cash=initial_cash, strategy_name=strategy_name,
+                              trade_start=start_dt, trade_end=end_dt)
 
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
@@ -674,7 +675,7 @@ def _render_fund(item, theme):
     # ======== 主区域：图表 + 明细 ========
     st.caption(
         f"全量数据：{full_data.index[0].strftime('%Y-%m-%d')} ~ {full_data.index[-1].strftime('%Y-%m-%d')}"
-        f"，共 {len(full_data)} 日 | 回测区间 {len(data)} 日"
+        f"，共 {len(full_data)} 日 | 交易区间 {len(result['data'])} 日"
     )
 
     explanation = result.get("explanation", {})
@@ -773,7 +774,7 @@ def _render_backtest(item, theme):
 
     # ---- 数据获取（缓存，仅切换标的时重新拉取） ----
     if is_demo:
-        data = generate_demo_data(300)
+        full_data = generate_demo_data(300)
     else:
         stock_cache_key = f"stock_data_{item['code']}"
         if stock_cache_key not in st.session_state:
@@ -783,13 +784,13 @@ def _render_backtest(item, theme):
                 st.error(f"获取 {item['name']} 数据失败")
                 return
             st.session_state[stock_cache_key] = raw
-        data = st.session_state[stock_cache_key]
+        full_data = st.session_state[stock_cache_key]
 
-    # ---- 日期过滤 ----
+    # ---- 交易窗口检查 ----
     start_dt = pd.Timestamp(backtest_start)
     end_dt = pd.Timestamp(backtest_end) + pd.Timedelta(days=1)
-    data = data[(data.index >= start_dt) & (data.index < end_dt)]
-    if data.empty:
+    trade_check = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
+    if trade_check.empty:
         st.warning(f"回测日期 {backtest_start} ~ {backtest_end} 内无可用数据")
         return
 
@@ -799,10 +800,11 @@ def _render_backtest(item, theme):
         st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
         st.session_state["_stock_fp"] = fp
 
-    # ---- 运行回测 ----
+    # ---- 运行回测（全量数据供指标预热，交易窗口限制实际下单） ----
     with st.spinner(f"运行「{strategy_name}」..."):
-        result = run_backtest(data, strat_info["class"], params,
-                              initial_cash=initial_cash, strategy_name=strategy_name)
+        result = run_backtest(full_data, strat_info["class"], params,
+                              initial_cash=initial_cash, strategy_name=strategy_name,
+                              trade_start=start_dt, trade_end=end_dt)
 
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
@@ -825,8 +827,8 @@ def _render_backtest(item, theme):
         st.caption("演示数据（模拟走势）")
     else:
         st.caption(
-            f"数据范围：{data.index[0].strftime('%Y-%m-%d')} ~ {data.index[-1].strftime('%Y-%m-%d')}"
-            f"，共 {len(data)} 个交易日"
+            f"全量数据：{full_data.index[0].strftime('%Y-%m-%d')} ~ {full_data.index[-1].strftime('%Y-%m-%d')}"
+            f"，共 {len(full_data)} 个交易日 | 交易区间 {len(result['data'])} 日"
         )
 
     explanation = result.get("explanation", {})

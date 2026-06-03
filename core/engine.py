@@ -53,11 +53,31 @@ TRIGGER_MAP = {
 
 def _make_logged_strategy(base_class, strategy_name):
     class LoggedStrategy(base_class):
+        params = (
+            ('trade_start', None),
+            ('trade_end', None),
+        )
+
         def __init__(self):
             super().__init__()
             self._trade_log = []
             self._open_info = {}
             self._strategy_name = strategy_name
+
+        def next(self):
+            dt = self.datas[0].datetime.date(0)
+            dt_ts = pd.Timestamp(dt)
+
+            # 交易窗口之前：只积累指标，不下单
+            if self.p.trade_start is not None and dt_ts < self.p.trade_start:
+                return
+            # 交易窗口之后：平掉所有持仓，不再下单
+            if self.p.trade_end is not None and dt_ts > self.p.trade_end:
+                if self.position:
+                    self.close()
+                return
+
+            super().next()
 
         def notify_trade(self, trade):
             if not trade.isclosed:
@@ -114,7 +134,7 @@ def _make_logged_strategy(base_class, strategy_name):
 
 def run_backtest(data, strategy_class, strategy_params,
                  initial_cash=100000, commission=0.0005,
-                 strategy_name=""):
+                 strategy_name="", trade_start=None, trade_end=None):
     # 统一列名为小写（兼容 yfinance 大写列名）
     data = data.rename(columns=str.lower).copy()
     data.columns = [c.lower() for c in data.columns]
@@ -124,7 +144,7 @@ def run_backtest(data, strategy_class, strategy_params,
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=commission)
     cerebro.adddata(bt.feeds.PandasData(dataname=data))
-    cerebro.addstrategy(LoggedCls, **strategy_params)
+    cerebro.addstrategy(LoggedCls, trade_start=trade_start, trade_end=trade_end, **strategy_params)
 
     cerebro.addanalyzer(bt.analyzers.Returns, _name='returns')
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe', riskfreerate=0.02)
@@ -133,12 +153,18 @@ def run_backtest(data, strategy_class, strategy_params,
     results = cerebro.run()
     strat = results[0]
 
+    # 按交易窗口截取数据用于指标计算和图表
+    if trade_start is not None and trade_end is not None:
+        trade_data = data[(data.index >= trade_start) & (data.index <= trade_end)]
+    else:
+        trade_data = data
+
     final_value = cerebro.broker.getvalue()
     total_return = (final_value - initial_cash) / initial_cash * 100
-    buy_hold = (data['close'].iloc[-1] - data['close'].iloc[0]) / data['close'].iloc[0] * 100
+    buy_hold = (trade_data['close'].iloc[-1] - trade_data['close'].iloc[0]) / trade_data['close'].iloc[0] * 100
 
     # 年化收益率 = (最终净值 / 初始净值)^(365 / 回测天数) - 1
-    backtest_days = (data.index[-1] - data.index[0]).days
+    backtest_days = (trade_data.index[-1] - trade_data.index[0]).days
     if backtest_days > 0:
         annualized_return = ((final_value / initial_cash) ** (365 / backtest_days) - 1) * 100
     else:
@@ -189,7 +215,7 @@ def run_backtest(data, strategy_class, strategy_params,
         metrics["胜率"] = "N/A"
 
     return {
-        "metrics": metrics, "trades": trades, "data": data,
+        "metrics": metrics, "trades": trades, "data": trade_data,
         "buy_points": buy_pts, "sell_points": sell_pts,
         "strategy_name": strategy_name,
         "explanation": STRATEGY_EXPLANATIONS.get(strategy_name, {}),
