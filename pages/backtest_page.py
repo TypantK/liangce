@@ -22,9 +22,27 @@ try:
 except ImportError:
     _PY_AVAIL = False
 
-# 基金原始数据
+# 用户持仓基金（按净值降序）
+_USER_FUNDS = [
+    ("270023", "广发全球精选股票(QDII)A",     6.909),
+    ("024239", "华夏全球科技先锋混合(QDII)C",  3.675),
+    ("011172", "广发利鑫灵活配置混合C",         3.633),
+    ("000217", "华安黄金ETF联接C",             3.282),
+    ("002611", "博时黄金ETF联接C",             3.058),
+    ("016453", "南方纳斯达克100指数(QDII)C",   2.382),
+    ("021750", "易方达创业板成长ETF联接C",      2.320),
+    ("008254", "华宝致远混合(QDII)C",          2.134),
+    ("016874", "广发远见智选混合C",             1.971),
+    ("025653", "大成创业板人工智能ETF联接C",    1.703),
+    ("016186", "广发电力公用事业ETF联接C",      1.291),
+    ("021378", "兴业中证港股通互联网ETF联接C",  1.124),
+    ("014111", "嘉实中证稀有金属主题ETF联接C",  1.076),
+    ("013528", "嘉实中证细分化工产业主题ETF联接C", 1.002),
+    ("015998", "大成中证电池主题ETF联接C",      0.951),
+]
+
+# 预置基金数据（排除已在用户持仓中的）
 _FUNDS_RAW = [
-    ("011172", "广发利鑫混合C"),
     ("000001", "华夏成长混合"),
     ("001933", "华商新兴活力混合"),
     ("005827", "易方达蓝筹精选混合"),
@@ -51,17 +69,22 @@ def _make_pinyin(name):
 
 
 def _make_unified_pool():
-    """构建统一数据池：演示数据 + 股票 + 基金"""
+    """构建统一数据池：用户基金(净值排序) + 预置基金 + 股票"""
     pool = []
+    # 用户持仓基金（优先展示）
+    for code, name, _ in _USER_FUNDS:
+        py, pyf = _make_pinyin(name)
+        pool.append({"type": "fund", "code": code, "name": name,
+                     "pinyin": py, "pinyin_first": pyf})
+    # 预置基金
+    for code, name in _FUNDS_RAW:
+        py, pyf = _make_pinyin(name)
+        pool.append({"type": "fund", "code": code, "name": name,
+                     "pinyin": py, "pinyin_first": pyf})
     # 股票
     for name, code in STOCK_POOL.items():
         py, pyf = _make_pinyin(name)
         pool.append({"type": "stock", "code": code, "name": name,
-                     "pinyin": py, "pinyin_first": pyf})
-    # 基金
-    for code, name in _FUNDS_RAW:
-        py, pyf = _make_pinyin(name)
-        pool.append({"type": "fund", "code": code, "name": name,
                      "pinyin": py, "pinyin_first": pyf})
     return pool
 
