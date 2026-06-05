@@ -640,10 +640,11 @@ def _render_fund(item, theme):
     for pn, (pmin, pmax, pdef) in strat_info["params"].items():
         label = labels.get(pn, pn)
         if pn == "position_pct":
-            params[pn] = st.sidebar.slider(
-                label, pmin, pmax, pdef, 0.05, key=f"fund_p_{pn}",
-                format_func=lambda v: f"{int(v*100)}%",
+            pct_val = st.sidebar.slider(
+                f"{label} (%)", int(pmin*100), int(pmax*100), int(pdef*100), 5,
+                key=f"fund_p_{pn}",
             )
+            params[pn] = pct_val / 100.0
         else:
             step = 0.1 if isinstance(pdef, float) else 1
             params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
@@ -870,10 +871,11 @@ def _render_backtest(item, theme):
     for pn, (pmin, pmax, pdef) in strat_info["params"].items():
         label = labels.get(pn, pn)
         if pn == "position_pct":
-            params[pn] = st.sidebar.slider(
-                label, pmin, pmax, pdef, 0.05, key=f"p_{pn}",
-                format_func=lambda v: f"{int(v*100)}%",
+            pct_val = st.sidebar.slider(
+                f"{label} (%)", int(pmin*100), int(pmax*100), int(pdef*100), 5,
+                key=f"p_{pn}",
             )
+            params[pn] = pct_val / 100.0
         else:
             step = 0.1 if isinstance(pdef, float) else 1
             params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
