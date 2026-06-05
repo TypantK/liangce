@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from core.strategies import STRATEGY_REGISTRY
+from core.position_sizer import SIZER_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data, fund_nav_to_ohlcv
 from core.engine import run_backtest
 from core.sentiment import parse_events_from_search
@@ -639,15 +640,37 @@ def _render_fund(item, theme):
     labels = strat_info.get("param_labels", {})
     for pn, (pmin, pmax, pdef) in strat_info["params"].items():
         label = labels.get(pn, pn)
-        if pn == "position_pct":
-            pct_val = st.sidebar.slider(
-                f"{label} (%)", int(pmin*100), int(pmax*100), int(pdef*100), 5,
-                key=f"fund_p_{pn}",
-            )
-            params[pn] = pct_val / 100.0
-        else:
-            step = 0.1 if isinstance(pdef, float) else 1
-            params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
+        step = 0.1 if isinstance(pdef, float) else 1
+        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
+
+    # ---- 侧边栏：仓位管理 ----
+    st.sidebar.markdown("**仓位管理**")
+    sizer_name = st.sidebar.selectbox(
+        "仓位管理器", list(SIZER_REGISTRY.keys()), key="fund_sizer")
+    sizer_info = SIZER_REGISTRY[sizer_name]
+    st.sidebar.caption(sizer_info["desc"])
+
+    sizer_params = {}
+    sizer_labels = sizer_info.get("param_labels", {})
+    for pn, pdef in sizer_info["params"].items():
+        label = sizer_labels.get(pn, pn)
+        if isinstance(pdef, tuple):
+            pmin, pmax, pval = pdef
+            if pn in ("fraction", "risk_pct", "avg_win", "avg_loss", "win_rate", "stop_pct"):
+                pct_val = st.sidebar.slider(
+                    f"{label} (%)", int(pmin * 100), int(pmax * 100), int(pval * 100),
+                    1, key=f"fund_sizer_{pn}",
+                )
+                sizer_params[pn] = pct_val / 100.0
+            else:
+                step_sz = 0.5 if isinstance(pval, float) else 1
+                sizer_params[pn] = st.sidebar.slider(
+                    label, pmin, pmax, pval, step_sz, key=f"fund_sizer_{pn}")
+    sizer_flags = sizer_info.get("flags", {})
+    for fn, fl in sizer_flags.items():
+        sizer_params[fn] = st.sidebar.checkbox(fl, value=False, key=f"fund_sizer_{fn}")
+
+    sizer_instance = sizer_info["class"](**sizer_params)
 
     # ---- 侧边栏：情绪模式 ----
     st.sidebar.markdown("**情绪增强**")
@@ -703,7 +726,8 @@ def _render_fund(item, theme):
         result = run_backtest(full_data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name,
                               trade_start=start_dt, trade_end=end_dt,
-                              sentiment_events=sentiment_events)
+                              sentiment_events=sentiment_events,
+                              position_sizer=sizer_instance)
 
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():
@@ -870,15 +894,37 @@ def _render_backtest(item, theme):
     labels = strat_info.get("param_labels", {})
     for pn, (pmin, pmax, pdef) in strat_info["params"].items():
         label = labels.get(pn, pn)
-        if pn == "position_pct":
-            pct_val = st.sidebar.slider(
-                f"{label} (%)", int(pmin*100), int(pmax*100), int(pdef*100), 5,
-                key=f"p_{pn}",
-            )
-            params[pn] = pct_val / 100.0
-        else:
-            step = 0.1 if isinstance(pdef, float) else 1
-            params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+        step = 0.1 if isinstance(pdef, float) else 1
+        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
+
+    # ---- 侧边栏：仓位管理 ----
+    st.sidebar.markdown("**仓位管理**")
+    sizer_name = st.sidebar.selectbox(
+        "仓位管理器", list(SIZER_REGISTRY.keys()), key="sizer")
+    sizer_info = SIZER_REGISTRY[sizer_name]
+    st.sidebar.caption(sizer_info["desc"])
+
+    sizer_params = {}
+    sizer_labels = sizer_info.get("param_labels", {})
+    for pn, pdef in sizer_info["params"].items():
+        label = sizer_labels.get(pn, pn)
+        if isinstance(pdef, tuple):
+            pmin, pmax, pval = pdef
+            if pn in ("fraction", "risk_pct", "avg_win", "avg_loss", "win_rate", "stop_pct"):
+                pct_val = st.sidebar.slider(
+                    f"{label} (%)", int(pmin * 100), int(pmax * 100), int(pval * 100),
+                    1, key=f"sizer_{pn}",
+                )
+                sizer_params[pn] = pct_val / 100.0
+            else:
+                step_sz = 0.5 if isinstance(pval, float) else 1
+                sizer_params[pn] = st.sidebar.slider(
+                    label, pmin, pmax, pval, step_sz, key=f"sizer_{pn}")
+    sizer_flags = sizer_info.get("flags", {})
+    for fn, fl in sizer_flags.items():
+        sizer_params[fn] = st.sidebar.checkbox(fl, value=False, key=f"sizer_{fn}")
+
+    sizer_instance = sizer_info["class"](**sizer_params)
 
     # ---- 侧边栏：情绪模式 ----
     st.sidebar.markdown("**情绪增强**")
@@ -935,7 +981,8 @@ def _render_backtest(item, theme):
         result = run_backtest(full_data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name,
                               trade_start=start_dt, trade_end=end_dt,
-                              sentiment_events=sentiment_events)
+                              sentiment_events=sentiment_events,
+                              position_sizer=sizer_instance)
 
     # ---- 侧边栏顶部：收益指标 ----
     with metrics_placeholder.container():

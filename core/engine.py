@@ -186,12 +186,13 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
 def run_backtest(data, strategy_class, strategy_params,
                  initial_cash=100000, commission=0.0005,
                  strategy_name="", trade_start=None, trade_end=None,
-                 sentiment_events=None):
+                 sentiment_events=None, position_sizer=None):
     """
     运行回测。
 
     sentiment_events: 可选，情绪事件列表 [(date_str, score, title), ...]
                       开启后，利空日暂停买入，极端利空强制平仓。
+    position_sizer:   可选，仓位管理器实例，策略通过 cerebro.position_sizer 访问。
     """
     # 统一列名为小写（兼容 yfinance 大写列名）
     data = data.rename(columns=str.lower).copy()
@@ -203,6 +204,10 @@ def run_backtest(data, strategy_class, strategy_params,
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=commission)
     cerebro.adddata(bt.feeds.PandasData(dataname=data))
+
+    # 挂载仓位管理器到 cerebro，策略通过 self.cerebro.position_sizer 访问
+    cerebro.position_sizer = position_sizer
+
     cerebro.addstrategy(LoggedCls, trade_start=trade_start, trade_end=trade_end, **strategy_params)
 
     cerebro.addanalyzer(bt.analyzers.Returns, _name='returns')
