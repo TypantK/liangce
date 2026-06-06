@@ -117,8 +117,11 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
 
         def notify_trade(self, trade):
             if not trade.isclosed:
+                # 建仓时直接存日期字符串，避免后续用 bar 索引查询 datetime 时越界
+                entry_dt = self.data.datetime.date(0)
                 self._open_info[trade.ref] = {
-                    'size': trade.size, 'baropen': trade.baropen}
+                    'size': trade.size, 'baropen': trade.baropen,
+                    'entry_date': entry_dt.strftime("%Y-%m-%d")}
             else:
                 info = self._open_info.pop(trade.ref, None)
                 if info is None:
@@ -140,24 +143,17 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                     elif pnl_pct > 3.5 and strategy_name == "双均线交叉":
                         exit_reason = TRIGGER_MAP[strategy_name]["sell_tp"]
 
-                # 情绪事件：查找买入/卖出日期附近的新闻
+                # 情绪事件：用建仓/平仓日期查找相关新闻
                 entry_news = ""
                 exit_news = ""
                 if self._sentiment_events:
-                    try:
-                        entry_date = trade.data.datetime.date(info['baropen']).strftime("%Y-%m-%d")
-                        _, _, eh = self._check_sentiment(entry_date)
-                        if eh:
-                            entry_news = " | ".join(eh[:3])
-                    except Exception:
-                        pass
-                    try:
-                        exit_date = trade.data.datetime.date(trade.barclose).strftime("%Y-%m-%d")
-                        _, _, xh = self._check_sentiment(exit_date)
-                        if xh:
-                            exit_news = " | ".join(xh[:3])
-                    except Exception:
-                        pass
+                    _, _, eh = self._check_sentiment(info.get("entry_date", ""))
+                    if eh:
+                        entry_news = " | ".join(eh[:3])
+                    exit_dt = self.data.datetime.date(0)
+                    _, _, xh = self._check_sentiment(exit_dt.strftime("%Y-%m-%d"))
+                    if xh:
+                        exit_news = " | ".join(xh[:3])
 
                 self._trade_log.append({
                     'baropen': info['baropen'], 'barclose': trade.barclose,
