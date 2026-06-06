@@ -813,22 +813,84 @@ def _render_fund(item, theme):
 
     if result["trades"]:
         st.subheader("交易明细")
-        trade_df = pd.DataFrame(result["trades"])
-        base_cols = ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
-        # 情绪模式 → 追加情绪事件列
-        if sentiment_mode and sentiment_events:
-            if "买入情绪事件" in trade_df.columns and trade_df["买入情绪事件"].str.strip().str.len().gt(0).any():
-                base_cols.insert(base_cols.index("买入原因") + 1, "买入情绪事件")
-            if "卖出情绪事件" in trade_df.columns and trade_df["卖出情绪事件"].str.strip().str.len().gt(0).any():
-                base_cols.insert(base_cols.index("卖出原因") + 1, "卖出情绪事件")
-        display_cols = [c for c in base_cols if c in trade_df.columns]
-        st.dataframe(
-            trade_df[display_cols], use_container_width=True, hide_index=True,
-            column_config={
-                "买入价": st.column_config.NumberColumn(format="%.4f"),
-                "卖出价": st.column_config.NumberColumn(format="%.4f"),
-            }
-        )
+
+        # 拆分买卖为独立行
+        trade_rows = []
+        for t in result["trades"]:
+            trade_rows.append({
+                "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
+                "原因": t.get("买入原因", ""), "盈亏": "",
+                "情绪事件": t.get("买入情绪事件", ""),
+            })
+            pnl = t["盈亏"]
+            trade_rows.append({
+                "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
+                "原因": t.get("卖出原因", ""), "盈亏": pnl,
+                "情绪事件": t.get("卖出情绪事件", ""),
+            })
+
+        # 构建带颜色区分的 HTML 表格
+        show_sentiment = bool(sentiment_mode and sentiment_events)
+        html_parts = [
+            '<table style="width:100%;border-collapse:collapse;font-size:13px">',
+            '<tr style="background:#e0e0e0;font-weight:bold">'
+            '<th style="padding:6px 10px;text-align:left">时间</th>'
+            '<th style="padding:6px 10px;text-align:center">方向</th>'
+            '<th style="padding:6px 10px;text-align:right">价格</th>'
+            '<th style="padding:6px 10px;text-align:left">原因</th>'
+            '<th style="padding:6px 10px;text-align:right">盈亏</th>'
+        ]
+        if show_sentiment:
+            html_parts.append('<th style="padding:6px 10px;text-align:left">情绪事件</th>')
+        html_parts.append('</tr>')
+
+        for r in trade_rows:
+            if r["方向"] == "buy":
+                bg = "#e8f5e9"
+                dir_html = '<span style="color:#2e7d32;font-weight:bold">买入</span>'
+            else:
+                bg = "#ffebee"
+                dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
+
+            pnl_str = r["盈亏"]
+            if pnl_str:
+                is_profit = pnl_str.startswith("+")
+                pnl_color = "#2e7d32" if is_profit else "#c62828"
+                pnl_html = f'<span style="color:{pnl_color}">{pnl_str}</span>'
+            else:
+                pnl_html = ""
+
+            sent_text = r.get("情绪事件", "")
+            if len(sent_text) > 60:
+                sent_text = sent_text[:57] + "..."
+
+            row = f'<tr style="background:{bg}">'
+            row += f'<td style="padding:6px 10px">{r["时间"]}</td>'
+            row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
+            row += f'<td style="padding:6px 10px;text-align:right">{r["价格"]}</td>'
+            row += f'<td style="padding:6px 10px">{r["原因"]}</td>'
+            row += f'<td style="padding:6px 10px;text-align:right">{pnl_html}</td>'
+            if show_sentiment:
+                row += f'<td style="padding:6px 10px;font-size:12px;max-width:200px">{sent_text}</td>'
+            row += '</tr>'
+            html_parts.append(row)
+
+        html_parts.append('</table>')
+        st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
+
+        # 情绪事件来源展开
+        if sentiment_mode and raw_news:
+            with st.expander(f"情绪事件来源：{sentiment_summary}"):
+                for item in raw_news:
+                    title = item.get("title", "")
+                    url = item.get("url", "")
+                    snippet = item.get("snippet", "")
+                    if url:
+                        st.markdown(f"- [{title}]({url})")
+                    else:
+                        st.markdown(f"- {title}")
+                    if snippet:
+                        st.caption(snippet[:150])
     else:
         st.info("本次回测期间无交易记录")
 
@@ -960,6 +1022,8 @@ def _render_backtest(item, theme):
         key="stock_sentiment",
     )
     sentiment_events = None
+    raw_news = None
+    sentiment_summary = ""
     if sentiment_mode:
         with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
             try:
@@ -967,6 +1031,7 @@ def _render_backtest(item, theme):
                 sentiment_events = parse_events_from_search(raw_news, item["name"])
                 if sentiment_events:
                     st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件")
+                    sentiment_summary = summarize_news(raw_news)
                 else:
                     st.sidebar.warning("未获取到相关新闻")
             except Exception:
@@ -1071,21 +1136,83 @@ def _render_backtest(item, theme):
 
     if result["trades"]:
         st.subheader("交易明细")
-        trade_df = pd.DataFrame(result["trades"])
-        base_cols = ["买入时间", "买入价", "买入原因", "卖出时间", "卖出价", "卖出原因", "盈亏"]
-        # 情绪模式 → 追加情绪事件列
-        if sentiment_mode and sentiment_events:
-            if "买入情绪事件" in trade_df.columns and trade_df["买入情绪事件"].str.strip().str.len().gt(0).any():
-                base_cols.insert(base_cols.index("买入原因") + 1, "买入情绪事件")
-            if "卖出情绪事件" in trade_df.columns and trade_df["卖出情绪事件"].str.strip().str.len().gt(0).any():
-                base_cols.insert(base_cols.index("卖出原因") + 1, "卖出情绪事件")
-        display_cols = [c for c in base_cols if c in trade_df.columns]
-        st.dataframe(
-            trade_df[display_cols], use_container_width=True, hide_index=True,
-            column_config={
-                "买入价": st.column_config.NumberColumn(format="¥%.2f"),
-                "卖出价": st.column_config.NumberColumn(format="¥%.2f"),
-            }
-        )
+
+        # 拆分买卖为独立行
+        trade_rows = []
+        for t in result["trades"]:
+            trade_rows.append({
+                "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
+                "原因": t.get("买入原因", ""), "盈亏": "",
+                "情绪事件": t.get("买入情绪事件", ""),
+            })
+            pnl = t["盈亏"]
+            trade_rows.append({
+                "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
+                "原因": t.get("卖出原因", ""), "盈亏": pnl,
+                "情绪事件": t.get("卖出情绪事件", ""),
+            })
+
+        # 构建带颜色区分的 HTML 表格
+        show_sentiment = bool(sentiment_mode and sentiment_events)
+        html_parts = [
+            '<table style="width:100%;border-collapse:collapse;font-size:13px">',
+            '<tr style="background:#e0e0e0;font-weight:bold">'
+            '<th style="padding:6px 10px;text-align:left">时间</th>'
+            '<th style="padding:6px 10px;text-align:center">方向</th>'
+            '<th style="padding:6px 10px;text-align:right">价格</th>'
+            '<th style="padding:6px 10px;text-align:left">原因</th>'
+            '<th style="padding:6px 10px;text-align:right">盈亏</th>'
+        ]
+        if show_sentiment:
+            html_parts.append('<th style="padding:6px 10px;text-align:left">情绪事件</th>')
+        html_parts.append('</tr>')
+
+        for r in trade_rows:
+            if r["方向"] == "buy":
+                bg = "#e8f5e9"
+                dir_html = '<span style="color:#2e7d32;font-weight:bold">买入</span>'
+            else:
+                bg = "#ffebee"
+                dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
+
+            pnl_str = r["盈亏"]
+            if pnl_str:
+                is_profit = pnl_str.startswith("+")
+                pnl_color = "#2e7d32" if is_profit else "#c62828"
+                pnl_html = f'<span style="color:{pnl_color}">{pnl_str}</span>'
+            else:
+                pnl_html = ""
+
+            sent_text = r.get("情绪事件", "")
+            if len(sent_text) > 60:
+                sent_text = sent_text[:57] + "..."
+
+            row = f'<tr style="background:{bg}">'
+            row += f'<td style="padding:6px 10px">{r["时间"]}</td>'
+            row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
+            row += f'<td style="padding:6px 10px;text-align:right">{r["价格"]}</td>'
+            row += f'<td style="padding:6px 10px">{r["原因"]}</td>'
+            row += f'<td style="padding:6px 10px;text-align:right">{pnl_html}</td>'
+            if show_sentiment:
+                row += f'<td style="padding:6px 10px;font-size:12px;max-width:200px">{sent_text}</td>'
+            row += '</tr>'
+            html_parts.append(row)
+
+        html_parts.append('</table>')
+        st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
+
+        # 情绪事件来源展开
+        if sentiment_mode and raw_news:
+            with st.expander(f"情绪事件来源：{sentiment_summary}"):
+                for item in raw_news:
+                    title = item.get("title", "")
+                    url = item.get("url", "")
+                    snippet = item.get("snippet", "")
+                    if url:
+                        st.markdown(f"- [{title}]({url})")
+                    else:
+                        st.markdown(f"- {title}")
+                    if snippet:
+                        st.caption(snippet[:150])
     else:
         st.info("本次回测期间无交易记录")
