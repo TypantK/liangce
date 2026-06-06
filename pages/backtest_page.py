@@ -556,21 +556,43 @@ def render():
         </style>
         """, unsafe_allow_html=True)
 
-    # ---- 侧边栏指标列自适应宽度 + 防截断 ----
+    # ---- 侧边栏指标卡片：紧凑化（缩小字体、减少间距） ----
     st.markdown("""
     <style>
+    /* 行容器：减小列间距 */
     section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
         flex-wrap: wrap !important;
+        gap: 0.2rem !important;
     }
     section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        min-width: 110px !important;
+        min-width: 105px !important;
         flex: 1 1 auto !important;
     }
-    /* 指标数值禁止截断 */
+
+    /* metric 整体：收缩 padding */
+    section[data-testid="stSidebar"] [data-testid="stMetric"] {
+        padding: 1px 3px !important;
+    }
+
+    /* metric 标签：缩小字号 */
+    section[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
+        font-size: 0.68rem !important;
+        line-height: 1.15 !important;
+    }
+
+    /* metric 数值：缩小字号 + 防截断 */
     section[data-testid="stSidebar"] [data-testid="stMetricValue"] {
+        font-size: 1.0rem !important;
+        line-height: 1.2 !important;
         white-space: nowrap !important;
         overflow: visible !important;
         text-overflow: clip !important;
+    }
+
+    /* metric delta：缩小字号 */
+    section[data-testid="stSidebar"] [data-testid="stMetricDelta"] {
+        font-size: 0.68rem !important;
+        line-height: 1.15 !important;
     }
     </style>
     """, unsafe_allow_html=True)
