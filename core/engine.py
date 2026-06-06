@@ -154,6 +154,7 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                 self._trade_log.append({
                     'baropen': info['baropen'], 'barclose': trade.barclose,
                     'entry': trade.price, 'exit': exit_p, 'pnl': trade.pnl,
+                    'size': sz,
                     'entry_reason': entry_reason, 'exit_reason': exit_reason,
                     'entry_news': '', 'exit_news': '',
                 })
@@ -260,6 +261,7 @@ def run_backtest(data, strategy_class, strategy_params,
         trades.append({
             "买入时间": data.index[bi].strftime('%Y-%m-%d %H:%M'),
             "买入价": round(tl['entry'], 2),
+            "买入数量": tl['size'],
             "买入原因": tl.get('entry_reason', ''),
             "卖出时间": data.index[si].strftime('%Y-%m-%d %H:%M'),
             "卖出价": round(tl['exit'], 2),

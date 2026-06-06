@@ -768,16 +768,26 @@ def _render_fund(item, theme):
         st.subheader("交易明细")
 
         # 拆分买卖为独立行
+        # 计算逐笔余额
+        init_cash_str = result["metrics"].get("初始资金", "¥100,000")
+        running_cash = float(init_cash_str.replace("¥", "").replace(",", "").replace("N/A", "100000"))
+
         trade_rows = []
         for t in result["trades"]:
+            buy_qty = t.get("买入数量", 0)
+            buy_cost = t["买入价"] * buy_qty
             trade_rows.append({
                 "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
-                "原因": t.get("买入原因", ""), "盈亏": "",
+                "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
             })
-            pnl = t["盈亏"]
+            pnl_str = t["盈亏"]
+            pnl_val = float(pnl_str) if pnl_str else 0.0
+            running_cash += pnl_val
             trade_rows.append({
                 "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
-                "原因": t.get("卖出原因", ""), "盈亏": pnl,
+                "原因": t.get("卖出原因", ""),
+                "余额": f"¥{running_cash:,.0f}",
+                "盈亏金额": f"{pnl_val:+,.2f}",
             })
 
         # 构建带颜色区分的 HTML 表格
@@ -788,32 +798,33 @@ def _render_fund(item, theme):
             '<th style="padding:6px 10px;text-align:center">方向</th>'
             '<th style="padding:6px 10px;text-align:right">价格</th>'
             '<th style="padding:6px 10px;text-align:left">原因</th>'
-            '<th style="padding:6px 10px;text-align:right">盈亏</th>'
+            '<th style="padding:6px 10px;text-align:right">余额</th>'
             '</tr>',
         ]
 
         for r in trade_rows:
             if r["方向"] == "buy":
-                bg = "#e8f5e9"
+                bg = "#a5d6a7"
                 dir_html = '<span style="color:#2e7d32;font-weight:bold">买入</span>'
             else:
-                bg = "#ffebee"
+                bg = "#ef9a9a"
                 dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
 
-            pnl_str = r["盈亏"]
-            if pnl_str:
-                is_profit = pnl_str.startswith("+")
-                pnl_color = "#2e7d32" if is_profit else "#c62828"
-                pnl_html = f'<span style="color:{pnl_color}">{pnl_str}</span>'
+            bal = r["余额"]
+            pnl_delta = r.get("盈亏金额", "")
+            if pnl_delta:
+                is_profit = pnl_delta.startswith("+")
+                bal_color = "#2e7d32" if is_profit else "#c62828"
+                bal_html = f'{bal} <span style="color:{bal_color};font-size:11px">({pnl_delta})</span>'
             else:
-                pnl_html = ""
+                bal_html = bal
 
             row = f'<tr style="background:{bg};color:#1a1a1a">'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["时间"]}</td>'
             row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
             row += f'<td style="padding:6px 10px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["原因"]}</td>'
-            row += f'<td style="padding:6px 10px;text-align:right">{pnl_html}</td>'
+            row += f'<td style="padding:6px 10px;text-align:right;white-space:nowrap">{bal_html}</td>'
             row += '</tr>'
             html_parts.append(row)
 
@@ -1074,16 +1085,26 @@ def _render_backtest(item, theme):
         st.subheader("交易明细")
 
         # 拆分买卖为独立行
+        # 计算逐笔余额
+        init_cash_str = result["metrics"].get("初始资金", "¥100,000")
+        running_cash = float(init_cash_str.replace("¥", "").replace(",", "").replace("N/A", "100000"))
+
         trade_rows = []
         for t in result["trades"]:
+            buy_qty = t.get("买入数量", 0)
+            buy_cost = t["买入价"] * buy_qty
             trade_rows.append({
                 "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
-                "原因": t.get("买入原因", ""), "盈亏": "",
+                "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
             })
-            pnl = t["盈亏"]
+            pnl_str = t["盈亏"]
+            pnl_val = float(pnl_str) if pnl_str else 0.0
+            running_cash += pnl_val
             trade_rows.append({
                 "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
-                "原因": t.get("卖出原因", ""), "盈亏": pnl,
+                "原因": t.get("卖出原因", ""),
+                "余额": f"¥{running_cash:,.0f}",
+                "盈亏金额": f"{pnl_val:+,.2f}",
             })
 
         # 构建带颜色区分的 HTML 表格
@@ -1094,32 +1115,33 @@ def _render_backtest(item, theme):
             '<th style="padding:6px 10px;text-align:center">方向</th>'
             '<th style="padding:6px 10px;text-align:right">价格</th>'
             '<th style="padding:6px 10px;text-align:left">原因</th>'
-            '<th style="padding:6px 10px;text-align:right">盈亏</th>'
+            '<th style="padding:6px 10px;text-align:right">余额</th>'
             '</tr>',
         ]
 
         for r in trade_rows:
             if r["方向"] == "buy":
-                bg = "#e8f5e9"
+                bg = "#a5d6a7"
                 dir_html = '<span style="color:#2e7d32;font-weight:bold">买入</span>'
             else:
-                bg = "#ffebee"
+                bg = "#ef9a9a"
                 dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
 
-            pnl_str = r["盈亏"]
-            if pnl_str:
-                is_profit = pnl_str.startswith("+")
-                pnl_color = "#2e7d32" if is_profit else "#c62828"
-                pnl_html = f'<span style="color:{pnl_color}">{pnl_str}</span>'
+            bal = r["余额"]
+            pnl_delta = r.get("盈亏金额", "")
+            if pnl_delta:
+                is_profit = pnl_delta.startswith("+")
+                bal_color = "#2e7d32" if is_profit else "#c62828"
+                bal_html = f'{bal} <span style="color:{bal_color};font-size:11px">({pnl_delta})</span>'
             else:
-                pnl_html = ""
+                bal_html = bal
 
             row = f'<tr style="background:{bg};color:#1a1a1a">'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["时间"]}</td>'
             row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
             row += f'<td style="padding:6px 10px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["原因"]}</td>'
-            row += f'<td style="padding:6px 10px;text-align:right">{pnl_html}</td>'
+            row += f'<td style="padding:6px 10px;text-align:right;white-space:nowrap">{bal_html}</td>'
             row += '</tr>'
             html_parts.append(row)
 
