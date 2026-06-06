@@ -556,47 +556,6 @@ def render():
         </style>
         """, unsafe_allow_html=True)
 
-    # ---- 侧边栏指标卡片：紧凑化（缩小字体、减少间距） ----
-    st.markdown("""
-    <style>
-    /* 行容器：减小列间距 */
-    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-        gap: 0.3rem !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        min-width: 90px !important;
-        flex: 1 1 auto !important;
-    }
-
-    /* metric 整体：收缩 padding */
-    section[data-testid="stSidebar"] [data-testid="stMetric"] {
-        padding: 0px 3px !important;
-    }
-
-    /* metric 标签：缩小字号 */
-    section[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
-        font-size: 0.68rem !important;
-        line-height: 1.1 !important;
-    }
-
-    /* metric 数值：缩小字号 + 防截断 */
-    section[data-testid="stSidebar"] [data-testid="stMetricValue"] {
-        font-size: 1.0rem !important;
-        line-height: 1.15 !important;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-    }
-
-    /* metric delta：缩小字号 */
-    section[data-testid="stSidebar"] [data-testid="stMetricDelta"] {
-        font-size: 0.68rem !important;
-        line-height: 1.1 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
     # ========== 统一数据源选择 ==========
     all_labels = []
     for it in UNIFIED_POOL:
@@ -631,10 +590,7 @@ def render():
 #  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
 # ============================================================
 def _render_fund(item, theme):
-    """收益指标置顶 → 策略/参数/收益指标 → 侧边栏；净值图/交易明细 → 主区域"""
-
-    # ---- 侧边栏顶部占位（回测后填入收益指标） ----
-    metrics_placeholder = st.sidebar.empty()
+    """策略/参数 → 侧边栏；收益指标 + 净值图/交易明细 → 主区域"""
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
@@ -754,21 +710,18 @@ def _render_fund(item, theme):
                               sentiment_events=sentiment_events,
                               position_sizer=sizer_instance)
 
-    # ---- 侧边栏顶部：收益指标 ----
-    with metrics_placeholder.container():
-        m = result["metrics"]
-        c1, c2 = st.columns(2)
-        c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        c2.metric("回撤", m["最大回撤"])
-        c3, c4 = st.columns(2)
-        c3.metric("夏普", m["夏普比率"])
-        c4.metric("胜率", m["胜率"])
-        c5, c6 = st.columns(2)
-        c5.metric("次数", m["交易次数"])
-        c6.metric("资金", m["最终资金"])
-        c7, c8 = st.columns(2)
-        c7.metric("年化", m["年化收益率"])
-        c8.metric("买入持有", m["买入持有"])
+    # ---- 主区域顶部：收益指标（2行 × 4列） ----
+    m = result["metrics"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    c2.metric("最大回撤", m["最大回撤"])
+    c3.metric("夏普比率", m["夏普比率"])
+    c4.metric("胜率", m["胜率"])
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("交易次数", m["交易次数"])
+    c6.metric("最终资金", m["最终资金"])
+    c7.metric("年化收益率", m["年化收益率"])
+    c8.metric("买入持有", m["买入持有"])
 
     # ======== 主区域：图表 + 明细 ========
     st.caption(
@@ -946,11 +899,8 @@ def _render_fund(item, theme):
 #  _render_backtest  — 股票回测（侧边栏参数 + 主区 K 线）
 # ============================================================
 def _render_backtest(item, theme):
-    """收益指标置顶 → 策略/参数/收益指标 → 侧边栏；K 线/交易明细 → 主区域"""
+    """策略/参数 → 侧边栏；收益指标 + K 线/交易明细 → 主区域"""
     is_demo = item["type"] == "demo"
-
-    # ---- 侧边栏顶部占位（回测后填入收益指标） ----
-    metrics_placeholder = st.sidebar.empty()
 
     # ---- 侧边栏：标的标识 ----
     if not is_demo:
@@ -1074,21 +1024,18 @@ def _render_backtest(item, theme):
                               sentiment_events=sentiment_events,
                               position_sizer=sizer_instance)
 
-    # ---- 侧边栏顶部：收益指标 ----
-    with metrics_placeholder.container():
-        m = result["metrics"]
-        c1, c2 = st.columns(2)
-        c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        c2.metric("回撤", m["最大回撤"])
-        c3, c4 = st.columns(2)
-        c3.metric("夏普", m["夏普比率"])
-        c4.metric("胜率", m["胜率"])
-        c5, c6 = st.columns(2)
-        c5.metric("次数", m["交易次数"])
-        c6.metric("资金", m["最终资金"])
-        c7, c8 = st.columns(2)
-        c7.metric("年化", m["年化收益率"])
-        c8.metric("买入持有", m["买入持有"])
+    # ---- 主区域顶部：收益指标（2行 × 4列） ----
+    m = result["metrics"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    c2.metric("最大回撤", m["最大回撤"])
+    c3.metric("夏普比率", m["夏普比率"])
+    c4.metric("胜率", m["胜率"])
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("交易次数", m["交易次数"])
+    c6.metric("最终资金", m["最终资金"])
+    c7.metric("年化收益率", m["年化收益率"])
+    c8.metric("买入持有", m["买入持有"])
 
     # ======== 主区域：K 线 + 明细 ========
     if is_demo:
