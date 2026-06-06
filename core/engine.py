@@ -80,7 +80,7 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             if not self._sentiment_events:
                 return 0.0, "", []
             score, headlines = get_sentiment_for_date(
-                self._sentiment_events, dt_str, window_days=7)
+                self._sentiment_events, dt_str, window_days=3)
             # 回测日期与新闻日期可能不重叠 → 降级为全局情绪
             if score == 0.0 and not headlines:
                 all_scores = [s for _, s, _ in self._sentiment_events]
