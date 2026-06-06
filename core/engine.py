@@ -72,6 +72,7 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             self._open_info = {}
             self._strategy_name = strategy_name
             self._sentiment_events = sentiment_events or []
+            self._sentiment_force_news = []  # 极空利空强制平仓时的新闻标题
 
         def _check_sentiment(self, dt_str):
             """返回 (分数, 标签, 新闻列表)。
@@ -108,8 +109,9 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                 # 利空情绪 → 暂停买入（不执行 super().next()，策略不会下单）
                 if sent_score < 0:
                     return
-                # 极端利空 → 强制平仓
+                # 极端利空 → 强制平仓，记录触发新闻供 notify_trade 使用
                 if sent_score < -3 and self.position:
+                    self._sentiment_force_news = list(sent_news[:3])
                     self.close()
                     return
 
@@ -143,23 +145,17 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                     elif pnl_pct > 3.5 and strategy_name == "双均线交叉":
                         exit_reason = TRIGGER_MAP[strategy_name]["sell_tp"]
 
-                # 情绪事件：用建仓/平仓日期查找相关新闻
-                entry_news = ""
-                exit_news = ""
-                if self._sentiment_events:
-                    _, _, eh = self._check_sentiment(info.get("entry_date", ""))
-                    if eh:
-                        entry_news = " | ".join(eh[:3])
-                    exit_dt = self.data.datetime.date(0)
-                    _, _, xh = self._check_sentiment(exit_dt.strftime("%Y-%m-%d"))
-                    if xh:
-                        exit_news = " | ".join(xh[:3])
+                # 情绪极端利空强制平仓：将新闻标题编号写入卖出原因
+                if self._sentiment_force_news:
+                    numbered = "; ".join(f"({i+1}){n}" for i, n in enumerate(self._sentiment_force_news))
+                    exit_reason = f"情绪极端利空强制平仓 {numbered}"
+                    self._sentiment_force_news = []
 
                 self._trade_log.append({
                     'baropen': info['baropen'], 'barclose': trade.barclose,
                     'entry': trade.price, 'exit': exit_p, 'pnl': trade.pnl,
                     'entry_reason': entry_reason, 'exit_reason': exit_reason,
-                    'entry_news': entry_news, 'exit_news': exit_news,
+                    'entry_news': '', 'exit_news': '',
                 })
 
     # 让 backtrader 在 sys.modules 中找到策略类的模块

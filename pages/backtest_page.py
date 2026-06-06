@@ -773,17 +773,14 @@ def _render_fund(item, theme):
             trade_rows.append({
                 "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
                 "原因": t.get("买入原因", ""), "盈亏": "",
-                "情绪事件": t.get("买入情绪事件", ""),
             })
             pnl = t["盈亏"]
             trade_rows.append({
                 "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
                 "原因": t.get("卖出原因", ""), "盈亏": pnl,
-                "情绪事件": t.get("卖出情绪事件", ""),
             })
 
         # 构建带颜色区分的 HTML 表格
-        show_sentiment = bool(sentiment_mode and sentiment_events)
         html_parts = [
             '<table style="width:100%;border-collapse:collapse;font-size:13px">',
             '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
@@ -792,10 +789,8 @@ def _render_fund(item, theme):
             '<th style="padding:6px 10px;text-align:right">价格</th>'
             '<th style="padding:6px 10px;text-align:left">原因</th>'
             '<th style="padding:6px 10px;text-align:right">盈亏</th>'
+            '</tr>',
         ]
-        if show_sentiment:
-            html_parts.append('<th style="padding:6px 10px;text-align:left">情绪事件</th>')
-        html_parts.append('</tr>')
 
         for r in trade_rows:
             if r["方向"] == "buy":
@@ -813,18 +808,12 @@ def _render_fund(item, theme):
             else:
                 pnl_html = ""
 
-            sent_text = r.get("情绪事件", "")
-            if len(sent_text) > 60:
-                sent_text = sent_text[:57] + "..."
-
             row = f'<tr style="background:{bg};color:#1a1a1a">'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["时间"]}</td>'
             row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
             row += f'<td style="padding:6px 10px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["原因"]}</td>'
             row += f'<td style="padding:6px 10px;text-align:right">{pnl_html}</td>'
-            if show_sentiment:
-                row += f'<td style="padding:6px 10px;font-size:12px;max-width:200px;color:#1a1a1a">{sent_text}</td>'
             row += '</tr>'
             html_parts.append(row)
 
@@ -1090,17 +1079,14 @@ def _render_backtest(item, theme):
             trade_rows.append({
                 "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
                 "原因": t.get("买入原因", ""), "盈亏": "",
-                "情绪事件": t.get("买入情绪事件", ""),
             })
             pnl = t["盈亏"]
             trade_rows.append({
                 "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
                 "原因": t.get("卖出原因", ""), "盈亏": pnl,
-                "情绪事件": t.get("卖出情绪事件", ""),
             })
 
         # 构建带颜色区分的 HTML 表格
-        show_sentiment = bool(sentiment_mode and sentiment_events)
         html_parts = [
             '<table style="width:100%;border-collapse:collapse;font-size:13px">',
             '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
@@ -1109,10 +1095,8 @@ def _render_backtest(item, theme):
             '<th style="padding:6px 10px;text-align:right">价格</th>'
             '<th style="padding:6px 10px;text-align:left">原因</th>'
             '<th style="padding:6px 10px;text-align:right">盈亏</th>'
+            '</tr>',
         ]
-        if show_sentiment:
-            html_parts.append('<th style="padding:6px 10px;text-align:left">情绪事件</th>')
-        html_parts.append('</tr>')
 
         for r in trade_rows:
             if r["方向"] == "buy":
@@ -1130,18 +1114,12 @@ def _render_backtest(item, theme):
             else:
                 pnl_html = ""
 
-            sent_text = r.get("情绪事件", "")
-            if len(sent_text) > 60:
-                sent_text = sent_text[:57] + "..."
-
             row = f'<tr style="background:{bg};color:#1a1a1a">'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["时间"]}</td>'
             row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
             row += f'<td style="padding:6px 10px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
             row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["原因"]}</td>'
             row += f'<td style="padding:6px 10px;text-align:right">{pnl_html}</td>'
-            if show_sentiment:
-                row += f'<td style="padding:6px 10px;font-size:12px;max-width:200px;color:#1a1a1a">{sent_text}</td>'
             row += '</tr>'
             html_parts.append(row)
 
