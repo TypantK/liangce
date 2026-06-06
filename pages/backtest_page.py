@@ -654,7 +654,7 @@ def _render_fund(item, theme):
     st.sidebar.markdown("**情绪增强**")
     sentiment_mode = st.sidebar.checkbox(
         "情绪模式",
-        value=False,
+        value=True,
         help="开启后实时抓取市场新闻，根据情绪得分过滤交易信号：利好时正常交易，利空时暂停入场",
         key="fund_sentiment",
     )
