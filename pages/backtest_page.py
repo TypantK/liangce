@@ -14,7 +14,7 @@ from core.strategies import STRATEGY_REGISTRY
 from core.position_sizer import SIZER_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, generate_demo_data, fund_nav_to_ohlcv
 from core.engine import run_backtest
-from core.sentiment import parse_events_from_search
+from core.sentiment import parse_events_from_search, summarize_news
 from core.sentiment_fetcher import fetch_news
 from utils.chart import plot_backtest, render_strategy_card, plot_fund_backtest
 
@@ -562,28 +562,28 @@ def render():
     /* 行容器：减小列间距 */
     section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
         flex-wrap: wrap !important;
-        gap: 0.2rem !important;
+        gap: 0.3rem !important;
     }
     section[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        min-width: 105px !important;
+        min-width: 90px !important;
         flex: 1 1 auto !important;
     }
 
     /* metric 整体：收缩 padding */
     section[data-testid="stSidebar"] [data-testid="stMetric"] {
-        padding: 1px 3px !important;
+        padding: 0px 3px !important;
     }
 
     /* metric 标签：缩小字号 */
     section[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
         font-size: 0.68rem !important;
-        line-height: 1.15 !important;
+        line-height: 1.1 !important;
     }
 
     /* metric 数值：缩小字号 + 防截断 */
     section[data-testid="stSidebar"] [data-testid="stMetricValue"] {
         font-size: 1.0rem !important;
-        line-height: 1.2 !important;
+        line-height: 1.15 !important;
         white-space: nowrap !important;
         overflow: visible !important;
         text-overflow: clip !important;
@@ -592,7 +592,7 @@ def render():
     /* metric delta：缩小字号 */
     section[data-testid="stSidebar"] [data-testid="stMetricDelta"] {
         font-size: 0.68rem !important;
-        line-height: 1.15 !important;
+        line-height: 1.1 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -703,6 +703,8 @@ def _render_fund(item, theme):
         key="fund_sentiment",
     )
     sentiment_events = None
+    raw_news = None
+    sentiment_summary = ""
     if sentiment_mode:
         with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
             try:
@@ -710,6 +712,7 @@ def _render_fund(item, theme):
                 sentiment_events = parse_events_from_search(raw_news, item["name"])
                 if sentiment_events:
                     st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件")
+                    sentiment_summary = summarize_news(raw_news)
                 else:
                     st.sidebar.warning("未获取到相关新闻")
             except Exception:
@@ -756,15 +759,15 @@ def _render_fund(item, theme):
         m = result["metrics"]
         c1, c2 = st.columns(2)
         c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        c2.metric("最大回撤", m["最大回撤"])
+        c2.metric("回撤", m["最大回撤"])
         c3, c4 = st.columns(2)
-        c3.metric("夏普比率", m["夏普比率"])
+        c3.metric("夏普", m["夏普比率"])
         c4.metric("胜率", m["胜率"])
         c5, c6 = st.columns(2)
-        c5.metric("交易次数", m["交易次数"])
-        c6.metric("最终资金", m["最终资金"])
+        c5.metric("次数", m["交易次数"])
+        c6.metric("资金", m["最终资金"])
         c7, c8 = st.columns(2)
-        c7.metric("年化收益率", m["年化收益率"])
+        c7.metric("年化", m["年化收益率"])
         c8.metric("买入持有", m["买入持有"])
 
     # ======== 主区域：图表 + 明细 ========
@@ -1011,15 +1014,15 @@ def _render_backtest(item, theme):
         m = result["metrics"]
         c1, c2 = st.columns(2)
         c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-        c2.metric("最大回撤", m["最大回撤"])
+        c2.metric("回撤", m["最大回撤"])
         c3, c4 = st.columns(2)
-        c3.metric("夏普比率", m["夏普比率"])
+        c3.metric("夏普", m["夏普比率"])
         c4.metric("胜率", m["胜率"])
         c5, c6 = st.columns(2)
-        c5.metric("交易次数", m["交易次数"])
-        c6.metric("最终资金", m["最终资金"])
+        c5.metric("次数", m["交易次数"])
+        c6.metric("资金", m["最终资金"])
         c7, c8 = st.columns(2)
-        c7.metric("年化收益率", m["年化收益率"])
+        c7.metric("年化", m["年化收益率"])
         c8.metric("买入持有", m["买入持有"])
 
     # ======== 主区域：K 线 + 明细 ========

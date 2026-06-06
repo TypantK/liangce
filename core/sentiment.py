@@ -126,3 +126,64 @@ def format_sentiment_tag(score: float) -> str:
         return "偏空"
     else:
         return "中性"
+
+
+def summarize_news(raw_news: list[dict]) -> str:
+    """
+    从原始新闻列表生成一句情绪摘要标题。
+    raw_news 每项含 title / snippet / url / source 等字段。
+    """
+    if not raw_news:
+        return "暂无市场情绪数据"
+
+    scored = []
+    for item in raw_news:
+        title = item.get("title", "")
+        snippet = item.get("snippet", "")
+        score = score_headline(f"{title} {snippet}")
+        scored.append((score, title))
+
+    positive = [t for s, t in scored if s > 0]
+    negative = [t for s, t in scored if s < 0]
+    total = sum(s for s, _ in scored)
+
+    if total > 3:
+        tag = "利好"
+    elif total > 1:
+        tag = "偏多"
+    elif total < -3:
+        tag = "利空"
+    elif total < -1:
+        tag = "偏空"
+    else:
+        tag = "中性"
+
+    # 关键词提取：从利好/利空标题中各取一个代表词
+    pos_key = ""
+    if positive:
+        p = positive[0]
+        for kw in ["突破", "利好", "看好", "流入", "增长", "涨停"]:
+            if kw in p:
+                pos_key = kw
+                break
+        if not pos_key:
+            pos_key = "偏多信号"
+
+    neg_key = ""
+    if negative:
+        n = negative[0]
+        for kw in ["风险", "利空", "下滑", "减持", "监管", "调查"]:
+            if kw in n:
+                neg_key = kw
+                break
+        if not neg_key:
+            neg_key = "利空信号"
+
+    if positive and negative:
+        return f"{tag}情绪：{pos_key} vs {neg_key}（抓取{len(raw_news)}条新闻）"
+    elif positive:
+        return f"{tag}情绪：{pos_key}（抓取{len(raw_news)}条新闻）"
+    elif negative:
+        return f"{tag}情绪：{neg_key}（抓取{len(raw_news)}条新闻）"
+    else:
+        return f"{tag}情绪（抓取{len(raw_news)}条新闻）"
