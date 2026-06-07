@@ -775,16 +775,27 @@ def _render_fund(item, theme):
         trade_rows = []
         for t in result["trades"]:
             buy_qty = t.get("买入数量", 0)
-            buy_cost = t["买入价"] * buy_qty
+            sent_mult = t.get("情绪乘数", 1.0)
+            sent_score = t.get("情绪得分", 0.0)
+            sent_desc = t.get("情绪说明", "")
+            # 计划数量 = Base Sizer 原始股数
+            base_qty = int(buy_qty / sent_mult) if sent_mult > 0 else int(buy_qty)
+            # 买入行
             trade_rows.append({
                 "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
+                "计划数量": str(base_qty),
+                "实际数量": str(int(buy_qty)),
+                "情绪得分": sent_score, "情绪乘数": sent_mult, "仓位调整": sent_desc if sent_desc else "",
                 "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
             })
             pnl_str = t["盈亏"]
             pnl_val = float(pnl_str) if pnl_str else 0.0
             running_cash += pnl_val
+            # 卖出行
             trade_rows.append({
                 "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
+                "计划数量": "", "实际数量": str(int(buy_qty)),
+                "情绪得分": 0.0, "情绪乘数": 1.0, "仓位调整": "",
                 "原因": t.get("卖出原因", ""),
                 "余额": f"¥{running_cash:,.0f}",
                 "盈亏金额": f"{pnl_val:+,.2f}",
@@ -792,13 +803,22 @@ def _render_fund(item, theme):
 
         # 构建带颜色区分的 HTML 表格
         html_parts = [
-            '<table style="width:100%;border-collapse:collapse;font-size:13px">',
+            '<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px">',
+            '<colgroup>'
+            '<col style="width:10%"><col style="width:4%"><col style="width:6%">'
+            '<col style="width:10%"><col style="width:10%"><col style="width:12%">'
+            '<col style="width:28%"><col style="width:10%"><col style="width:10%">'
+            '</colgroup>',
             '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
-            '<th style="padding:6px 10px;text-align:left">时间</th>'
-            '<th style="padding:6px 10px;text-align:center">方向</th>'
-            '<th style="padding:6px 10px;text-align:right">价格</th>'
-            '<th style="padding:6px 10px;text-align:left">原因</th>'
-            '<th style="padding:6px 10px;text-align:right">余额</th>'
+            '<th style="padding:6px 8px;text-align:left">时间</th>'
+            '<th style="padding:6px 8px;text-align:center">方向</th>'
+            '<th style="padding:6px 8px;text-align:right">价格</th>'
+            '<th style="padding:6px 8px;text-align:center">计划数量</th>'
+            '<th style="padding:6px 8px;text-align:center">实际数量</th>'
+            '<th style="padding:6px 8px;text-align:center">情绪强度</th>'
+            '<th style="padding:6px 8px;text-align:left">原因</th>'
+            '<th style="padding:6px 8px;text-align:center">仓位调整</th>'
+            '<th style="padding:6px 8px;text-align:right">余额</th>'
             '</tr>',
         ]
 
@@ -819,12 +839,35 @@ def _render_fund(item, theme):
             else:
                 bal_html = bal
 
+            plan_qty = r.get("计划数量", "")
+            actual_qty = r.get("实际数量", "")
+
+            # 情绪强度列：买入行显示分数+乘数，卖出行留空
+            sent_html = ""
+            if r["方向"] == "buy":
+                sc = r.get("情绪得分", 0.0)
+                sm = r.get("情绪乘数", 1.0)
+                if sc != 0.0 or sm != 1.0:
+                    abs_sc = min(abs(sc), 3.0)
+                    lightness = 60 - (35 / 3.0) * abs_sc  # 0→60%, ≥3→25%
+                    if sc > 0:
+                        color = f"hsl(140,70%,{lightness:.0f}%)"
+                    else:
+                        color = f"hsl(0,70%,{lightness:.0f}%)"
+                    sent_html = f'<span style="color:{color};font-weight:bold">{sc:+.1f}(×{sm:.1f})</span>'
+
+            adj = r.get("仓位调整", "")
+
             row = f'<tr style="background:{bg};color:#1a1a1a">'
-            row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["时间"]}</td>'
-            row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
-            row += f'<td style="padding:6px 10px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
-            row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["原因"]}</td>'
-            row += f'<td style="padding:6px 10px;text-align:right;white-space:nowrap">{bal_html}</td>'
+            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["时间"]}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center">{dir_html}</td>'
+            row += f'<td style="padding:6px 8px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{plan_qty}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{actual_qty}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center">{sent_html}</td>'
+            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["原因"]}</td>'
+            row += f'<td style="padding:6px 8px;color:#1a1a1a;font-size:12px;white-space:nowrap">{adj}</td>'
+            row += f'<td style="padding:6px 8px;text-align:right;white-space:nowrap">{bal_html}</td>'
             row += '</tr>'
             html_parts.append(row)
 
@@ -1092,16 +1135,27 @@ def _render_backtest(item, theme):
         trade_rows = []
         for t in result["trades"]:
             buy_qty = t.get("买入数量", 0)
-            buy_cost = t["买入价"] * buy_qty
+            sent_mult = t.get("情绪乘数", 1.0)
+            sent_score = t.get("情绪得分", 0.0)
+            sent_desc = t.get("情绪说明", "")
+            # 计划数量 = Base Sizer 原始股数
+            base_qty = int(buy_qty / sent_mult) if sent_mult > 0 else int(buy_qty)
+            # 买入行
             trade_rows.append({
                 "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
+                "计划数量": str(base_qty),
+                "实际数量": str(int(buy_qty)),
+                "情绪得分": sent_score, "情绪乘数": sent_mult, "仓位调整": sent_desc if sent_desc else "",
                 "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
             })
             pnl_str = t["盈亏"]
             pnl_val = float(pnl_str) if pnl_str else 0.0
             running_cash += pnl_val
+            # 卖出行
             trade_rows.append({
                 "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
+                "计划数量": "", "实际数量": str(int(buy_qty)),
+                "情绪得分": 0.0, "情绪乘数": 1.0, "仓位调整": "",
                 "原因": t.get("卖出原因", ""),
                 "余额": f"¥{running_cash:,.0f}",
                 "盈亏金额": f"{pnl_val:+,.2f}",
@@ -1109,13 +1163,22 @@ def _render_backtest(item, theme):
 
         # 构建带颜色区分的 HTML 表格
         html_parts = [
-            '<table style="width:100%;border-collapse:collapse;font-size:13px">',
+            '<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px">',
+            '<colgroup>'
+            '<col style="width:10%"><col style="width:4%"><col style="width:6%">'
+            '<col style="width:10%"><col style="width:10%"><col style="width:12%">'
+            '<col style="width:28%"><col style="width:10%"><col style="width:10%">'
+            '</colgroup>',
             '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
-            '<th style="padding:6px 10px;text-align:left">时间</th>'
-            '<th style="padding:6px 10px;text-align:center">方向</th>'
-            '<th style="padding:6px 10px;text-align:right">价格</th>'
-            '<th style="padding:6px 10px;text-align:left">原因</th>'
-            '<th style="padding:6px 10px;text-align:right">余额</th>'
+            '<th style="padding:6px 8px;text-align:left">时间</th>'
+            '<th style="padding:6px 8px;text-align:center">方向</th>'
+            '<th style="padding:6px 8px;text-align:right">价格</th>'
+            '<th style="padding:6px 8px;text-align:center">计划数量</th>'
+            '<th style="padding:6px 8px;text-align:center">实际数量</th>'
+            '<th style="padding:6px 8px;text-align:center">情绪强度</th>'
+            '<th style="padding:6px 8px;text-align:left">原因</th>'
+            '<th style="padding:6px 8px;text-align:center">仓位调整</th>'
+            '<th style="padding:6px 8px;text-align:right">余额</th>'
             '</tr>',
         ]
 
@@ -1136,12 +1199,35 @@ def _render_backtest(item, theme):
             else:
                 bal_html = bal
 
+            plan_qty = r.get("计划数量", "")
+            actual_qty = r.get("实际数量", "")
+
+            # 情绪强度列：买入行显示分数+乘数，卖出行留空
+            sent_html = ""
+            if r["方向"] == "buy":
+                sc = r.get("情绪得分", 0.0)
+                sm = r.get("情绪乘数", 1.0)
+                if sc != 0.0 or sm != 1.0:
+                    abs_sc = min(abs(sc), 3.0)
+                    lightness = 60 - (35 / 3.0) * abs_sc  # 0→60%, ≥3→25%
+                    if sc > 0:
+                        color = f"hsl(140,70%,{lightness:.0f}%)"
+                    else:
+                        color = f"hsl(0,70%,{lightness:.0f}%)"
+                    sent_html = f'<span style="color:{color};font-weight:bold">{sc:+.1f}(×{sm:.1f})</span>'
+
+            adj = r.get("仓位调整", "")
+
             row = f'<tr style="background:{bg};color:#1a1a1a">'
-            row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["时间"]}</td>'
-            row += f'<td style="padding:6px 10px;text-align:center">{dir_html}</td>'
-            row += f'<td style="padding:6px 10px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
-            row += f'<td style="padding:6px 10px;color:#1a1a1a">{r["原因"]}</td>'
-            row += f'<td style="padding:6px 10px;text-align:right;white-space:nowrap">{bal_html}</td>'
+            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["时间"]}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center">{dir_html}</td>'
+            row += f'<td style="padding:6px 8px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{plan_qty}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{actual_qty}</td>'
+            row += f'<td style="padding:6px 8px;text-align:center">{sent_html}</td>'
+            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["原因"]}</td>'
+            row += f'<td style="padding:6px 8px;color:#1a1a1a;font-size:12px;white-space:nowrap">{adj}</td>'
+            row += f'<td style="padding:6px 8px;text-align:right;white-space:nowrap">{bal_html}</td>'
             row += '</tr>'
             html_parts.append(row)
 

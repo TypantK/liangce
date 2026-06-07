@@ -73,6 +73,7 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             self._strategy_name = strategy_name
             self._sentiment_events = sentiment_events or []
             self._sentiment_force_news = []  # 极空利空强制平仓时的新闻标题
+            self._last_sentiment_score = 0.0
 
         def _check_sentiment(self, dt_str):
             """返回 (分数, 标签, 新闻列表)。
@@ -104,6 +105,7 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             # --- 情绪模式：检查市场情绪，影响入场决策 ---
             if self._sentiment_events:
                 sent_score, sent_tag, sent_news = self._check_sentiment(dt_str)
+                self._last_sentiment_score = sent_score
                 # 利空情绪 → 暂停买入（不执行 super().next()，策略不会下单）
                 if sent_score < 0:
                     return
@@ -149,12 +151,26 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                     exit_reason = f"情绪极端利空强制平仓 {numbered}"
                     self._sentiment_force_news = []
 
+                # 读取仓位叠加层的调整信息
+                sizer = getattr(self.cerebro, 'position_sizer', None)
+                sent_mult = 1.0
+                sent_label = ""
+                sent_desc = ""
+                if sizer and hasattr(sizer, '_last_multiplier'):
+                    sent_mult = sizer._last_multiplier
+                    sent_label = sizer._last_label
+                    sent_desc = sizer._last_desc
+
                 self._trade_log.append({
                     'baropen': info['baropen'], 'barclose': trade.barclose,
                     'entry': trade.price, 'exit': exit_p, 'pnl': trade.pnl,
                     'size': sz,
                     'entry_reason': entry_reason, 'exit_reason': exit_reason,
                     'entry_news': '', 'exit_news': '',
+                    'sentiment_score': self._last_sentiment_score,
+                    'sentiment_multiplier': sent_mult,
+                    'sentiment_label': sent_label,
+                    'sentiment_desc': sent_desc,
                 })
 
     # 让 backtrader 在 sys.modules 中找到策略类的模块
@@ -267,6 +283,10 @@ def run_backtest(data, strategy_class, strategy_params,
             "盈亏": f"{tl['pnl']:+.2f}",
             "买入情绪事件": tl.get('entry_news', ''),
             "卖出情绪事件": tl.get('exit_news', ''),
+            "情绪得分": tl.get('sentiment_score', 0.0),
+            "情绪乘数": tl.get('sentiment_multiplier', 1.0),
+            "情绪标签": tl.get('sentiment_label', ''),
+            "情绪说明": tl.get('sentiment_desc', ''),
         })
 
     n = len(trades)
