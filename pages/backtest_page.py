@@ -825,7 +825,7 @@ def _render_fund(item, theme):
         for r in trade_rows:
             if r["方向"] == "buy":
                 bg = "#a5d6a7"
-                dir_html = '<span style="color:#2e7d32;font-weight:bold">买入</span>'
+                dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
             else:
                 bg = "#ef9a9a"
                 dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
@@ -1185,7 +1185,7 @@ def _render_backtest(item, theme):
         for r in trade_rows:
             if r["方向"] == "buy":
                 bg = "#a5d6a7"
-                dir_html = '<span style="color:#2e7d32;font-weight:bold">买入</span>'
+                dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
             else:
                 bg = "#ef9a9a"
                 dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
