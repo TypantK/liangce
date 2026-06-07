@@ -81,21 +81,9 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                 return 0.0, "", []
             score, headlines = get_sentiment_for_date(
                 self._sentiment_events, dt_str, window_days=3)
-            # 回测日期与新闻日期可能不重叠 → 降级为全局情绪
-            # 按日期加权平均：越新的新闻权重越高（0.3→1.0 线性），避免利好利空互相抵消
+            # 回测日期与新闻日期完全不重叠 → 无情绪影响，正常交易
             if score == 0.0 and not headlines:
-                sorted_events = sorted(
-                    self._sentiment_events, key=lambda x: x[0])
-                n = len(sorted_events)
-                total_weight = 0.0
-                weighted_score = 0.0
-                for i, (_, s, _) in enumerate(sorted_events):
-                    w = 0.3 + 0.7 * (i / max(n - 1, 1))
-                    weighted_score += s * w
-                    total_weight += w
-                score = round(weighted_score / total_weight, 2)
-                # 取最近5条用于展示
-                headlines = [t for _, _, t in sorted_events[-5:]]
+                return 0.0, "", []
             tag = format_sentiment_tag(score)
             return score, tag, headlines
 
