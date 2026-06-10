@@ -293,6 +293,17 @@ def run_backtest(data, strategy_class, strategy_params,
             "情绪说明": tl.get('sentiment_desc', ''),
         })
 
+    # 将买卖点索引从全量 data 空间重映射到 trade_data 空间
+    if trade_start is not None and trade_end is not None:
+        buy_pts = [
+            (trade_data.index.get_loc(data.index[bi]), entry)
+            for bi, entry in buy_pts
+        ]
+        sell_pts = [
+            (trade_data.index.get_loc(data.index[si]), exit_p)
+            for si, exit_p in sell_pts
+        ]
+
     n = len(trades)
     if n > 0:
         won = sum(1 for tl in trade_log if tl['pnl'] > 0)
