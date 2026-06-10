@@ -828,7 +828,7 @@ def _render_fund(item, theme):
                 dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
             else:
                 bg = "#ef9a9a"
-                dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
+                dir_html = '<span style="color:#c62828;font-weight:bold">卖</span>'
 
             bal = r["余额"]
             pnl_delta = r.get("盈亏金额", "")
@@ -1188,7 +1188,7 @@ def _render_backtest(item, theme):
                 dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
             else:
                 bg = "#ef9a9a"
-                dir_html = '<span style="color:#c62828;font-weight:bold">卖出</span>'
+                dir_html = '<span style="color:#c62828;font-weight:bold">卖</span>'
 
             bal = r["余额"]
             pnl_delta = r.get("盈亏金额", "")
