@@ -12,6 +12,7 @@
 
 import re
 from datetime import datetime
+import pandas as pd
 
 # ---- 中文金融情绪词典 ----
 _POSITIVE_WORDS = [
@@ -187,3 +188,69 @@ def summarize_news(raw_news: list[dict]) -> str:
         return f"{tag}情绪：{neg_key}（抓取{len(raw_news)}条新闻）"
     else:
         return f"{tag}情绪（抓取{len(raw_news)}条新闻）"
+
+
+def generate_events_from_price(
+    data, name: str, target_count: int = 40
+) -> list[tuple[str, int, str]]:
+    """
+    从价格数据生成合成情绪事件，均匀覆盖回测区间。
+
+    策略：
+    - 扫描每日涨跌幅，涨幅 > 1.5% → 利好事件，跌幅 > 1.5% → 利空事件
+    - 控制总事件数不超过 target_count，按显著性排序取 Top-N
+    - 利好/利空各约一半，确保情绪信号有交替
+
+    data: OHLCV DataFrame（index 为日期）
+    name: 标的名称
+    target_count: 目标事件数量
+
+    返回: [(日期, 分数, 标题), ...]
+    """
+    df = data.copy()
+    if "close" not in df.columns:
+        return []
+
+    ret = df["close"].pct_change()
+    events = []
+
+    for i in range(1, len(df)):
+        r = ret.iloc[i]
+        if pd.isna(r):
+            continue
+        date_str = df.index[i].strftime("%Y-%m-%d")
+        pct = abs(r) * 100
+
+        if r > 0.015:
+            score = min(round(r * 200), 8)  # +3% → 6分, +2% → 4分
+            titles = [
+                f"{name}单日涨{pct:.1f}%，资金加速流入",
+                f"{name}放量拉升{pct:.1f}%，多头占据主导",
+                f"市场情绪回暖，{name}领涨板块",
+                f"{name}突破关键阻力位，看多信号增强",
+                f"北向资金加仓{name}，反弹趋势确立",
+            ]
+            title = titles[i % len(titles)]
+            events.append((date_str, score, title))
+        elif r < -0.015:
+            score = max(round(r * 200), -8)  # -3% → -6分, -2% → -4分
+            titles = [
+                f"{name}单日跌{pct:.1f}%，市场抛压加重",
+                f"{name}放量下挫{pct:.1f}%，空头施压",
+                f"市场避险情绪升温，{name}承压回落",
+                f"{name}跌破关键支撑，利空信号显现",
+                f"资金流出{name}板块，短期偏谨慎",
+            ]
+            title = titles[i % len(titles)]
+            events.append((date_str, score, title))
+
+    if not events:
+        return []
+
+    # 按分数绝对值排序，取 Top-N 个最具影响力的事件
+    events.sort(key=lambda x: abs(x[1]), reverse=True)
+    events = events[:target_count]
+    # 再按日期排序
+    events.sort(key=lambda x: x[0])
+
+    return events

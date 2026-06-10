@@ -77,14 +77,18 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
 
         def _check_sentiment(self, dt_str):
             """返回 (分数, 标签, 新闻列表)。
-            如果指定日期无匹配事件，使用全局情绪（所有事件平均分）。"""
+            先查指定日期附近事件；无匹配时降级为全局情绪（所有事件平均分 + 全部标题）。"""
             if not self._sentiment_events:
                 return 0.0, "", []
             score, headlines = get_sentiment_for_date(
                 self._sentiment_events, dt_str, window_days=3)
-            # 回测日期与新闻日期完全不重叠 → 无情绪影响，正常交易
             if score == 0.0 and not headlines:
-                return 0.0, "", []
+                # 无日期匹配 → 降级为全局情绪
+                all_scores = [s for _, s, _ in self._sentiment_events]
+                global_score = round(sum(all_scores) / len(all_scores), 2) if all_scores else 0.0
+                all_titles = [t for _, _, t in self._sentiment_events]
+                tag = format_sentiment_tag(global_score)
+                return global_score, tag, all_titles[:3]
             tag = format_sentiment_tag(score)
             return score, tag, headlines
 
