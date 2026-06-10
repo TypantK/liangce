@@ -41,6 +41,60 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     return results
 
 
+def _search_google_news_rss(query: str, max_results: int = 8) -> list[dict]:
+    """使用 Google News RSS 搜索新闻。"""
+    encoded_query = urllib.parse.quote(query + " 财经")
+    rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+
+    # 尝试 feedparser
+    try:
+        import feedparser
+        feed = feedparser.parse(rss_url)
+        if feed.entries:
+            results = []
+            for entry in feed.entries[:max_results]:
+                results.append({
+                    "title": entry.get("title", ""),
+                    "snippet": entry.get("summary", ""),
+                    "url": entry.get("link", ""),
+                    "source": "news",
+                })
+            if results:
+                return results
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # 降级：urllib + xml.etree.ElementTree 解析 RSS
+    try:
+        import xml.etree.ElementTree as ET
+        req = urllib.request.Request(rss_url, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            xml_data = resp.read().decode("utf-8", errors="replace")
+        root = ET.fromstring(xml_data)
+        channel = root.find("channel")
+        if channel is None:
+            return []
+        results = []
+        for item in channel.findall("item")[:max_results]:
+            title = item.findtext("title", "")
+            link = item.findtext("link", "")
+            description = item.findtext("description", "")
+            if title:
+                results.append({
+                    "title": title,
+                    "snippet": description or "",
+                    "url": link or "",
+                    "source": "news",
+                })
+        return results
+    except Exception:
+        return []
+
+
 def _sample_news(query: str) -> list[dict]:
     """示例新闻数据（当真实搜索不可用时降级使用）。
 
@@ -49,10 +103,10 @@ def _sample_news(query: str) -> list[dict]:
       day-3 ~ day-2: 利空初现，买入暂停
       day-1 ~ today: 强利空爆发(sentiment < -3)，触发极端利空强制平仓
 
-    URL 使用 Google 搜索标题，点击可查看相关新闻搜索结果。
+    URL 使用 Google News RSS 搜索链接，点击可查看相关新闻。
     """
     def _search_url(title: str) -> str:
-        return "https://www.google.com/search?q=" + urllib.parse.quote(title)
+        return "https://news.google.com/rss/search?q=" + urllib.parse.quote(title) + "&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
 
     now = datetime.now()
     d7 = (now - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -89,6 +143,11 @@ def fetch_news(query: str, max_results: int = 6) -> list[dict]:
     """
     # 尝试 DuckDuckGo
     results = _search_duckduckgo(query, max_results)
+    if results:
+        return results
+
+    # 尝试 Google News RSS
+    results = _search_google_news_rss(query, max_results)
     if results:
         return results
 

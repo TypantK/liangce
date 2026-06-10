@@ -882,8 +882,9 @@ def _render_fund(item, theme):
                     url = item.get("url", "")
                     snippet = item.get("snippet", "")
                     if url:
-                        st.markdown(f"- [{title}]({url})")
-                    else:
+                        link_text = title if title else (snippet[:60] + "…" if snippet else "查看原文")
+                        st.markdown(f"- [{link_text}]({url})")
+                    elif title:
                         st.markdown(f"- {title}")
                     if snippet:
                         st.caption(snippet[:150])
@@ -1247,8 +1248,9 @@ def _render_backtest(item, theme):
                     url = item.get("url", "")
                     snippet = item.get("snippet", "")
                     if url:
-                        st.markdown(f"- [{title}]({url})")
-                    else:
+                        link_text = title if title else (snippet[:60] + "…" if snippet else "查看原文")
+                        st.markdown(f"- [{link_text}]({url})")
+                    elif title:
                         st.markdown(f"- {title}")
                     if snippet:
                         st.caption(snippet[:150])

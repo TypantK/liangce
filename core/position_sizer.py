@@ -153,3 +153,68 @@ SIZER_REGISTRY = {
         "desc": "每笔最大亏损固定，由止损距离反推股数"
     },
 }
+
+# ============================================================
+# 情绪仓位叠加层 (Sentiment Overlay)
+# ============================================================
+
+def get_sentiment_multiplier(score):
+    """根据情绪分数返回 (乘数, 标签, 说明)。
+    
+    情绪分数范围：正=利好, 负=利空, 绝对值越大越极端
+    """
+    if score > 2:
+        return 1.2, "利好加仓", "情绪强烈利好，仓位加至120%"
+    elif score > 0.5:
+        return 1.0, "偏多正常", "偏多情绪，维持正常仓位"
+    elif score > -0.5:
+        return 0.8, "中性收缩", "情绪中性偏谨慎，仓位收至80%"
+    elif score > -2:
+        return 0.5, "偏空减半", "偏空情绪，仓位减至50%"
+    elif score > -3:
+        return 0.2, "利空轻仓", "利空情绪，仓位缩至20%"
+    else:
+        return 0.0, "强利空停仓", "强烈利空，暂停新开仓"
+
+
+class SentimentPositionSizer(BaseSizer):
+    """仓位叠加层：包装基础 Sizer，根据情绪缩放最终股数。
+    
+    策略通过 calc_size 获取的下单量 = base_sizer.calc_size() × 情绪乘数。
+    每次 calc_size 调用后记录 _last_base_size / _last_multiplier / _last_label，
+    供 notify_trade 读取后写入交易日志。
+    """
+
+    def __init__(self, base_sizer, sentiment_events=None):
+        self.base_sizer = base_sizer
+        self.sentiment_events = sentiment_events or []
+        self._current_score = 0.0
+        self._current_tag = ""
+        self._current_news = []
+        self._current_multiplier = 1.0
+        self._current_label = ""
+        self._current_desc = ""
+        # 上一次 calc_size 的结果快照（notify_trade 读取后自行重置）
+        self._last_base_size = 0
+        self._last_multiplier = 1.0
+        self._last_label = ""
+        self._last_desc = ""
+
+    def set_sentiment(self, score, tag, news):
+        """每根 bar 调用，更新当前情绪状态。"""
+        self._current_score = score
+        self._current_tag = tag
+        self._current_news = news
+        self._current_multiplier, self._current_label, self._current_desc = \
+            get_sentiment_multiplier(score)
+
+    def calc_size(self, cash, price, **kwargs):
+        """计算情绪调整后的股数。先调用基础 Sizer，再乘情绪乘数。"""
+        base_size = self.base_sizer.calc_size(cash, price, **kwargs)
+        adjusted = int(max(0, base_size * self._current_multiplier))
+        # 记录快照供 notify_trade 读取
+        self._last_base_size = int(base_size)
+        self._last_multiplier = self._current_multiplier
+        self._last_label = self._current_label
+        self._last_desc = self._current_desc
+        return adjusted
