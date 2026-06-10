@@ -589,6 +589,136 @@ def render():
 # ============================================================
 #  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
 # ============================================================
+def _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt):
+    """横向对比复盘分析：解释排名原因"""
+    if compare_df.empty or len(compare_df) < 2:
+        return
+
+    # 提取策略行（排除买入持有基准行），按总收益率排序
+    strategy_rows = compare_df[compare_df["策略"] != "📊 买入持有"].copy()
+    if strategy_rows.empty:
+        return
+
+    # 提取数值
+    strategy_rows["_return_val"] = strategy_rows["_return_val"].astype(float)
+    ranked = strategy_rows.sort_values("_return_val", ascending=False)
+
+    top = ranked.iloc[0]
+    bottom = ranked.iloc[-1]
+
+    top_name = top["策略"].replace("★ ", "")
+    top_ret = float(top["_return_val"])
+    bottom_name = bottom["策略"].replace("★ ", "")
+    bottom_ret = float(bottom["_return_val"])
+    strategy_count = len(ranked)
+
+    # ---- 市场环境判断 ----
+    days = (end_dt - start_dt).days
+    months = max(days / 30, 1)
+    if bh_return > 8:
+        market_label = "单边上涨牛市"
+        market_verdict = "趋势类策略普遍优于均值回归类策略"
+    elif bh_return > 2:
+        market_label = "温和上涨"
+        market_verdict = "趋势策略略有优势，但震荡策略也能低吸高抛获利"
+    elif bh_return > -2:
+        market_label = "横盘震荡"
+        market_verdict = "均值回归类策略（RSI、布林带）反复低吸高抛占优，趋势策略容易被反复打脸"
+    elif bh_return > -8:
+        market_label = "温和下跌"
+        market_verdict = "做多策略普遍承压；能捕捉反弹的震荡策略和止损机制严的策略相对抗跌"
+    else:
+        market_label = "单边下跌熊市"
+        market_verdict = "所有做多策略都难逃亏损，差异主要来自止损是否及时"
+
+    # ---- 策略类型分析 ----
+    trend_strategies = {"双均线交叉", "MACD 策略", "卡尔曼滤波趋势", "HMA 低延迟均线",
+                        "线性回归斜率", "一目均衡表", "唐奇安通道突破", "ADX 趋势强度",
+                        "抛物线 SAR", "成交量加权 MACD"}
+    mean_reversion_strategies = {"RSI 超买超卖", "布林带策略"}
+
+    top_is_trend = top_name in trend_strategies
+    top_is_mr = top_name in mean_reversion_strategies
+    bottom_is_trend = bottom_name in trend_strategies
+    bottom_is_mr = bottom_name in mean_reversion_strategies
+
+    # ---- 分段解释 ----
+    lines = [
+        f"### 横向对比复盘",
+        "",
+        f"**回测区间**：{start_dt.strftime('%Y-%m-%d')} ~ {end_dt.strftime('%Y-%m-%d')}（约 {int(months)} 个月）",
+        f"**市场环境**：{market_label}（买入持有收益 {bh_return:+.1f}%）",
+        f"**参评策略**：{strategy_count} 个",
+        "",
+        f"**{market_verdict}**",
+        "",
+    ]
+
+    # 冠军分析
+    if top_is_trend:
+        stype = "趋势跟踪"
+    elif top_is_mr:
+        stype = "均值回归"
+    else:
+        stype = "混合型"
+
+    lines.append(f"**冠军**「{top_name}」({stype}型) 收益率 {top_ret:+.1f}%：")
+    if top_is_trend and bh_return > 2:
+        lines.append(f"- 牛市中趋势策略能完整吃到主升浪，{top_name} 的趋势识别机制在上涨段开仓积极、持仓坚定")
+    elif top_is_trend and bh_return <= 2:
+        lines.append(f"- 震荡/下跌市中{top_name}仍能跑赢，可能归因于其止损机制及时控制亏损，或捕捉到个别反弹波段")
+    elif top_is_mr and abs(bh_return) < 5:
+        lines.append(f"- 震荡市中{top_name}反复低吸高抛，积小胜为大胜，资金利用率高")
+    elif top_is_mr:
+        lines.append(f"- {top_name} 在非典型行情中仍能通过精确的入场/离场点捕捉到波段机会")
+
+    # 垫底分析
+    if bottom_is_trend:
+        stype_b = "趋势跟踪"
+    elif bottom_is_mr:
+        stype_b = "均值回归"
+    else:
+        stype_b = "混合型"
+
+    lines.append("")
+    lines.append(f"**垫底**「{bottom_name}」({stype_b}型) 收益率 {bottom_ret:+.1f}%：")
+    if bottom_is_trend and bh_return < 2:
+        lines.append(f"- 震荡/下跌市中趋势策略容易被反复假突破磨损，{bottom_name} 可能在横盘期频繁开平仓导致手续费侵蚀利润")
+    elif bottom_is_trend:
+        lines.append(f"- 牛市里趋势策略垫底通常是因为参数偏保守（止损过紧、信号确认太晚），未充分吃到趋势段")
+    elif bottom_is_mr and bh_return > 5:
+        lines.append(f"- 单边牛市中均值回归策略会过早离场，{bottom_name} 吃到反弹就卖，错过主升浪")
+    elif bottom_is_mr:
+        lines.append(f"- 下跌市中均值回归策略抄底后价格继续跌，屡抄屡亏")
+
+    # 情绪模式补充
+    if sentiment_mode and sentiment_events:
+        scores = [s for _, s, _ in sentiment_events]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        if avg_score > 0.3:
+            sent_desc = "整体偏乐观"
+        elif avg_score > -0.3:
+            sent_desc = "情绪中性"
+        else:
+            sent_desc = "整体偏悲观"
+        pos_count = sum(1 for s in scores if s > 0)
+        neg_count = sum(1 for s in scores if s < 0)
+        lines.append("")
+        lines.append(f"**情绪信号**：{sent_desc}（正面事件 {pos_count} 条，负面事件 {neg_count} 条，平均分 {avg_score:+.2f}）")
+        if avg_score > 0:
+            lines.append("- 乐观情绪下策略普遍持仓更积极，趋势策略受益更明显")
+        else:
+            lines.append("- 悲观情绪触发空仓机制，对趋势策略的保护优于均值回归策略")
+
+    lines.append("")
+    lines.append("*以上分析基于默认参数回测结果，参数优化后可改变排名。市场环境判断依赖于买入持有收益，不代表未来走势。*")
+
+    st.info("\n".join(lines))
+
+
+# ============================================================
+#  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
+# ============================================================
 def _render_fund(item, theme):
     """策略/参数 → 侧边栏；收益指标 + 净值图/交易明细 → 主区域"""
 
@@ -996,6 +1126,8 @@ def _render_fund(item, theme):
         }
     )
     st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
+
+    _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt)
 
 
 # ============================================================
@@ -1415,3 +1547,5 @@ def _render_backtest(item, theme):
         }
     )
     st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
+
+    _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt)

@@ -468,6 +468,213 @@ class IchimokuStrategy(bt.Strategy):
 
 
 # ============================================================
+#  策略 9：唐奇安通道突破（滞后型）
+# ============================================================
+class DonchianChannelStrategy(bt.Strategy):
+    """
+    唐奇安通道突破策略（Donchian Channel Breakout）。
+    经典海龟交易法则核心：价格突破 N 日最高点做多，跌破 N 日最低点平仓。
+    叠加跟踪止损防止利润大幅回吐。
+    """
+    params = (
+        ('period', 20),
+        ('trail_percent', 4.0),
+    )
+
+    def __init__(self):
+        self.donchian_high = bt.indicators.Highest(self.data.high, period=self.p.period)
+        self.donchian_low = bt.indicators.Lowest(self.data.low, period=self.p.period)
+        self.order = None
+        self.highest = 0
+
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+
+    def next(self):
+        if self.order:
+            return
+        current_close = self.data.close[0]
+        if not self.position:
+            if current_close > self.donchian_high[-1]:
+                sizer = getattr(self.cerebro, 'position_sizer', None) or FixedFractionSizer()
+                size = sizer.calc_size(cash=self.broker.getcash(), price=current_close)
+                self.order = self.buy(size=size)
+                self.highest = current_close
+        else:
+            self.highest = max(self.highest, current_close)
+            trailing = self.highest * (1 - self.p.trail_percent / 100)
+            if current_close < self.donchian_low[-1] or current_close < trailing:
+                self.order = self.sell(size=self.position.size)
+
+
+# ============================================================
+#  策略 10：ADX 趋势强度（滞后型）
+# ============================================================
+class ADXTrendStrategy(bt.Strategy):
+    """
+    ADX 趋势强度策略。
+    ADX 不判方向只判「趋势有多强」；方向由 +DI/-DI 决定。
+    ADX > 阈值 且 +DI > -DI → 强上涨趋势，做多；
+    反向条件平仓。
+    """
+    params = (
+        ('adx_period', 14),
+        ('adx_threshold', 25),
+        ('stop_loss', 3.0),
+    )
+
+    def __init__(self):
+        self.adx = bt.indicators.ADX(period=self.p.adx_period)
+        self.plus_di = bt.indicators.PlusDI(period=self.p.adx_period)
+        self.minus_di = bt.indicators.MinusDI(period=self.p.adx_period)
+        self.order = None
+        self.entry_price = 0
+
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+
+    def next(self):
+        if self.order:
+            return
+        if len(self.adx) == 0 or len(self.plus_di) == 0 or len(self.minus_di) == 0:
+            return
+        adx_val = self.adx[0]
+        plus_val = self.plus_di[0]
+        minus_val = self.minus_di[0]
+        current_close = self.data.close[0]
+
+        if not self.position:
+            if adx_val > self.p.adx_threshold and plus_val > minus_val:
+                sizer = getattr(self.cerebro, 'position_sizer', None) or FixedFractionSizer()
+                size = sizer.calc_size(cash=self.broker.getcash(), price=current_close)
+                self.order = self.buy(size=size)
+                self.entry_price = current_close
+        else:
+            pnl_pct = (current_close - self.entry_price) / self.entry_price * 100
+            if (adx_val > self.p.adx_threshold and minus_val > plus_val) or pnl_pct <= -self.p.stop_loss:
+                self.order = self.sell(size=self.position.size)
+
+
+# ============================================================
+#  策略 11：抛物线 SAR（预测型）
+# ============================================================
+class ParabolicSARStrategy(bt.Strategy):
+    """
+    抛物线 SAR 策略。
+    PSAR 是动态的止损/反转点，跟随趋势移动。
+    PSAR 翻转到价格下方 → 上升趋势确立，做多；
+    PSAR 翻转到价格上方 → 趋势走弱，平仓。
+    """
+    params = (
+        ('af_start', 0.02),
+        ('af_step', 0.02),
+        ('af_max', 0.20),
+        ('stop_loss', 5.0),
+    )
+
+    def __init__(self):
+        self.psar = bt.indicators.ParabolicSAR(
+            af=self.p.af_start, afmax=self.p.af_max
+        )
+        self.order = None
+        self.entry_price = 0
+
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+
+    def next(self):
+        if self.order:
+            return
+        if len(self.psar) < 2:
+            return
+        current_close = self.data.close[0]
+        current_psar = self.psar[0]
+        prev_psar = self.psar[-1]
+        prev_close = self.data.close[-1]
+
+        if not self.position:
+            # PSAR 翻转：前一根 PSAR 在价格上方，当前翻到下方 → 趋势转多
+            if prev_psar > prev_close and current_psar < current_close:
+                sizer = getattr(self.cerebro, 'position_sizer', None) or FixedFractionSizer()
+                size = sizer.calc_size(cash=self.broker.getcash(), price=current_close)
+                self.order = self.buy(size=size)
+                self.entry_price = current_close
+        else:
+            pnl_pct = (current_close - self.entry_price) / self.entry_price * 100
+            # PSAR 翻转到价格上方 → 趋势转空
+            psar_flip_down = (prev_psar < prev_close and current_psar > current_close)
+            if psar_flip_down or pnl_pct <= -self.p.stop_loss:
+                self.order = self.sell(size=self.position.size)
+
+
+# ============================================================
+#  策略 12：成交量加权 MACD（预测型）
+# ============================================================
+class VWAPMACDStrategy(bt.Strategy):
+    """
+    成交量加权 MACD 策略。
+    用 VWAP（成交量加权均价）替代收盘价计算 MACD，
+    反映资金实际成本而不是收盘时点的价格，减少尾盘异动的干扰。
+    金叉买、死叉卖。
+    """
+    params = (
+        ('macd_fast', 12),
+        ('macd_slow', 26),
+        ('macd_signal', 9),
+        ('vwap_period', 20),
+        ('stop_loss', 3.0),
+    )
+
+    def __init__(self):
+        # 用收盘价和成交量手工构造 VWAP
+        typical = (self.data.high + self.data.low + self.data.close) / 3.0
+        self.vwap = (typical * self.data.volume).sum() / self.data.volume.sum()
+        # MACD 基于 VWAP
+        self.macd = bt.indicators.MACD(
+            self.vwap,
+            period_me1=self.p.macd_fast,
+            period_me2=self.p.macd_slow,
+            period_signal=self.p.macd_signal,
+        )
+        self.macd_line = self.macd.lines.macd
+        self.signal_line = self.macd.lines.signal
+        self.order = None
+        self.entry_price = 0
+
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+
+    def next(self):
+        if self.order:
+            return
+        if len(self.macd_line) < 2 or len(self.signal_line) < 2:
+            return
+        current_close = self.data.close[0]
+        # 金叉/死叉判断
+        prev_macd = self.macd_line[-1]
+        prev_signal = self.signal_line[-1]
+        curr_macd = self.macd_line[0]
+        curr_signal = self.signal_line[0]
+        golden_cross = prev_macd <= prev_signal and curr_macd > curr_signal
+        dead_cross = prev_macd >= prev_signal and curr_macd < curr_signal
+
+        if not self.position:
+            if golden_cross:
+                sizer = getattr(self.cerebro, 'position_sizer', None) or FixedFractionSizer()
+                size = sizer.calc_size(cash=self.broker.getcash(), price=current_close)
+                self.order = self.buy(size=size)
+                self.entry_price = current_close
+        else:
+            pnl_pct = (current_close - self.entry_price) / self.entry_price * 100
+            if dead_cross or pnl_pct <= -self.p.stop_loss:
+                self.order = self.sell(size=self.position.size)
+
+
+# ============================================================
 #  策略注册表
 # ============================================================
 STRATEGY_REGISTRY = {
@@ -537,5 +744,40 @@ STRATEGY_REGISTRY = {
         "param_labels": {"tenkan": "转换线周期", "kijun": "基准线周期",
                          "senkou": "先行带周期", "stop_loss": "止损线（%）"},
         "desc": "云层投影到未来 26 期形成前瞻参考。价格在云上做多，跌破云底平仓。独特的预测性指标。"
+    },
+    # ---- 新增策略 ----
+    "唐奇安通道突破": {
+        "class": DonchianChannelStrategy,
+        "params": {"period": (10, 60, 20),
+                    "trail_percent": (1.0, 10.0, 4.0)},
+        "param_labels": {"period": "通道周期（天）",
+                         "trail_percent": "跟踪止损（%）"},
+        "desc": "经典海龟交易法则。价格突破N日最高点做多，跌破N日最低点或触发跟踪止损平仓。适合趋势行情。"
+    },
+    "ADX 趋势强度": {
+        "class": ADXTrendStrategy,
+        "params": {"adx_period": (7, 28, 14), "adx_threshold": (15, 40, 25),
+                    "stop_loss": (1.0, 8.0, 3.0)},
+        "param_labels": {"adx_period": "ADX 周期", "adx_threshold": "趋势阈值",
+                         "stop_loss": "止损线（%）"},
+        "desc": "ADX 判断趋势强度，+DI/-DI 判断方向。ADX>阈值且+DI>-DI 做多。只参与强趋势行情。"
+    },
+    "抛物线 SAR": {
+        "class": ParabolicSARStrategy,
+        "params": {"af_start": (0.01, 0.05, 0.02), "af_step": (0.01, 0.05, 0.02),
+                    "af_max": (0.10, 0.30, 0.20), "stop_loss": (2.0, 10.0, 5.0)},
+        "param_labels": {"af_start": "加速因子起点", "af_step": "加速步长",
+                         "af_max": "加速上限", "stop_loss": "止损线（%）"},
+        "desc": "PSAR 翻转到价格下方做多，翻转到上方平仓。动态止损/反转点跟随趋势移动。适合趋势行情。"
+    },
+    "成交量加权 MACD": {
+        "class": VWAPMACDStrategy,
+        "params": {"macd_fast": (8, 20, 12), "macd_slow": (20, 40, 26),
+                    "macd_signal": (5, 15, 9), "vwap_period": (10, 40, 20),
+                    "stop_loss": (1.0, 8.0, 3.0)},
+        "param_labels": {"macd_fast": "快线周期", "macd_slow": "慢线周期",
+                         "macd_signal": "信号线周期", "vwap_period": "VWAP 周期",
+                         "stop_loss": "止损线（%）"},
+        "desc": "用 VWAP（成交量加权均价）替代收盘价计算 MACD。反映资金真实成本，减少尾盘异动干扰。金叉买死叉卖。"
     },
 }
