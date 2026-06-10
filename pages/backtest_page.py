@@ -899,12 +899,17 @@ def _render_fund(item, theme):
     for s_name, s_info in STRATEGY_REGISTRY.items():
         # 提取默认参数
         default_params = {pn: prange[2] for pn, prange in s_info["params"].items()}
-        s_result = run_backtest(
-            full_data, s_info["class"], default_params,
-            initial_cash=initial_cash, strategy_name=s_name,
-            trade_start=start_dt, trade_end=end_dt,
-        )
-        m = s_result["metrics"]
+        try:
+            s_result = run_backtest(
+                full_data, s_info["class"], default_params,
+                initial_cash=initial_cash, strategy_name=s_name,
+                trade_start=start_dt, trade_end=end_dt,
+                sentiment_events=sentiment_events,
+                position_sizer=sizer_instance,
+            )
+            m = s_result["metrics"]
+        except Exception:
+            continue
         is_current = (s_name == strategy_name)
         compare_rows.append({
             "策略": f"{'★ ' if is_current else ''}{s_name}",
