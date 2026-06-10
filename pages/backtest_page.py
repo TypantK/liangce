@@ -940,22 +940,62 @@ def _render_fund(item, theme):
             "_return_val": _parse_pct(m["总收益率"]),
         })
 
+    # ---- 买入持有基准行 ----
+    bh_data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
+    bh_return = 0.0
+    bh_annual_return = 0.0
+    bh_max_dd = 0.0
+    bh_final_cash = initial_cash
+    if len(bh_data) > 1:
+        first_open = float(bh_data.iloc[0]["open"])
+        last_close = float(bh_data.iloc[-1]["close"])
+        if first_open > 0:
+            bh_return = (last_close - first_open) / first_open * 100
+            days = (bh_data.index[-1] - bh_data.index[0]).days
+            years = max(days / 365.25, 1 / 365.25)
+            bh_annual_return = (((last_close / first_open) ** (1 / years)) - 1) * 100
+            close_prices = bh_data["close"].values
+            peak = float(close_prices[0])
+            bh_max_dd = 0.0
+            for p in close_prices:
+                p_val = float(p)
+                if p_val > peak:
+                    peak = p_val
+                dd = (peak - p_val) / peak * 100
+                if dd > bh_max_dd:
+                    bh_max_dd = dd
+            bh_final_cash = initial_cash * (1 + bh_return / 100)
+
+    compare_rows.append({
+        "策略": "📊 买入持有",
+        "总收益率": f"{bh_return:.2f}%",
+        "年化收益率": f"{bh_annual_return:.2f}%",
+        "最大回撤": f"{bh_max_dd:.2f}%",
+        "夏普比率": "—",
+        "胜率": "—",
+        "交易次数": "0",
+        "最终资金": f"¥{bh_final_cash:,.2f}",
+        "买入持有": f"{bh_return:.2f}%",
+        "_current": False,
+        "_return_val": bh_return,
+    })
+
     compare_rows.sort(key=lambda r: r["_return_val"], reverse=True)
     compare_df = pd.DataFrame(compare_rows)
     display_cols = ["策略", "总收益率", "年化收益率", "最大回撤", "夏普比率", "胜率", "交易次数", "最终资金", "买入持有"]
     st.dataframe(
         compare_df[display_cols], use_container_width=True, hide_index=True,
         column_config={
-            "总收益率": st.column_config.NumberColumn(format="%.2f%%"),
-            "年化收益率": st.column_config.NumberColumn(format="%.2f%%"),
-            "最大回撤": st.column_config.NumberColumn(format="%.2f%%"),
-            "夏普比率": st.column_config.NumberColumn(format="%.2f"),
-            "胜率": st.column_config.NumberColumn(format="%.1f%%"),
+            "总收益率": st.column_config.NumberColumn(format="%.2f%%", help="策略回测期间的总盈亏百分比，已扣除交易费用"),
+            "年化收益率": st.column_config.NumberColumn(format="%.2f%%", help="按复利折算的年均收益率"),
+            "最大回撤": st.column_config.NumberColumn(format="%.2f%%", help="期间净值从最高点到最低点的最大跌幅"),
+            "夏普比率": st.column_config.NumberColumn(format="%.2f", help="风险调整后收益，越大越好"),
+            "胜率": st.column_config.NumberColumn(format="%.1f%%", help="盈利交易次数占总交易次数的比例"),
             "最终资金": st.column_config.NumberColumn(format="¥%.2f"),
-            "买入持有": st.column_config.NumberColumn(format="%.2f%%"),
+            "买入持有": st.column_config.NumberColumn(format="%.2f%%", help="不进行任何交易，从期初持有到期末的收益率"),
         }
     )
-    st.caption("★ 标记为当前选中的策略")
+    st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
 
 
 # ============================================================
@@ -1284,3 +1324,94 @@ def _render_backtest(item, theme):
                         st.caption(snippet[:150])
     else:
         st.info("本次回测期间无交易记录")
+
+    # ---- 策略横向对比 ----
+    st.markdown("---")
+    st.subheader("策略横向对比")
+    st.caption("同一股票、同一时段、同一初始资金下，各策略使用默认参数的回测表现")
+
+    compare_rows = []
+    for s_name, s_info in STRATEGY_REGISTRY.items():
+        default_params = {pn: prange[2] for pn, prange in s_info["params"].items()}
+        try:
+            s_result = run_backtest(
+                full_data, s_info["class"], default_params,
+                initial_cash=initial_cash, strategy_name=s_name,
+                trade_start=start_dt, trade_end=end_dt,
+                sentiment_events=sentiment_events,
+                position_sizer=sizer_instance,
+            )
+            m = s_result["metrics"]
+        except Exception:
+            continue
+        is_current = (s_name == strategy_name)
+        compare_rows.append({
+            "策略": f"{'★ ' if is_current else ''}{s_name}",
+            "总收益率": m["总收益率"],
+            "年化收益率": m["年化收益率"],
+            "最大回撤": m["最大回撤"],
+            "夏普比率": m["夏普比率"],
+            "胜率": m["胜率"],
+            "交易次数": m["交易次数"],
+            "最终资金": m["最终资金"],
+            "买入持有": m["买入持有"],
+            "_current": is_current,
+            "_return_val": _parse_pct(m["总收益率"]),
+        })
+
+    # ---- 买入持有基准行 ----
+    bh_data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
+    bh_return = 0.0
+    bh_annual_return = 0.0
+    bh_max_dd = 0.0
+    bh_final_cash = initial_cash
+    if len(bh_data) > 1:
+        first_open = float(bh_data.iloc[0]["open"])
+        last_close = float(bh_data.iloc[-1]["close"])
+        if first_open > 0:
+            bh_return = (last_close - first_open) / first_open * 100
+            days = (bh_data.index[-1] - bh_data.index[0]).days
+            years = max(days / 365.25, 1 / 365.25)
+            bh_annual_return = (((last_close / first_open) ** (1 / years)) - 1) * 100
+            close_prices = bh_data["close"].values
+            peak = float(close_prices[0])
+            bh_max_dd = 0.0
+            for p in close_prices:
+                p_val = float(p)
+                if p_val > peak:
+                    peak = p_val
+                dd = (peak - p_val) / peak * 100
+                if dd > bh_max_dd:
+                    bh_max_dd = dd
+            bh_final_cash = initial_cash * (1 + bh_return / 100)
+
+    compare_rows.append({
+        "策略": "📊 买入持有",
+        "总收益率": f"{bh_return:.2f}%",
+        "年化收益率": f"{bh_annual_return:.2f}%",
+        "最大回撤": f"{bh_max_dd:.2f}%",
+        "夏普比率": "—",
+        "胜率": "—",
+        "交易次数": "0",
+        "最终资金": f"¥{bh_final_cash:,.2f}",
+        "买入持有": f"{bh_return:.2f}%",
+        "_current": False,
+        "_return_val": bh_return,
+    })
+
+    compare_rows.sort(key=lambda r: r["_return_val"], reverse=True)
+    compare_df = pd.DataFrame(compare_rows)
+    display_cols = ["策略", "总收益率", "年化收益率", "最大回撤", "夏普比率", "胜率", "交易次数", "最终资金", "买入持有"]
+    st.dataframe(
+        compare_df[display_cols], use_container_width=True, hide_index=True,
+        column_config={
+            "总收益率": st.column_config.NumberColumn(format="%.2f%%", help="策略回测期间的总盈亏百分比，已扣除交易费用"),
+            "年化收益率": st.column_config.NumberColumn(format="%.2f%%", help="按复利折算的年均收益率"),
+            "最大回撤": st.column_config.NumberColumn(format="%.2f%%", help="期间净值从最高点到最低点的最大跌幅"),
+            "夏普比率": st.column_config.NumberColumn(format="%.2f", help="风险调整后收益，越大越好"),
+            "胜率": st.column_config.NumberColumn(format="%.1f%%", help="盈利交易次数占总交易次数的比例"),
+            "最终资金": st.column_config.NumberColumn(format="¥%.2f"),
+            "买入持有": st.column_config.NumberColumn(format="%.2f%%", help="不进行任何交易，从期初持有到期末的收益率"),
+        }
+    )
+    st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
