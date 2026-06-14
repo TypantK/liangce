@@ -275,6 +275,20 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
             zoomToRange(allX, idx - 30, idx + 30);
+            // ---- 回传点击日期给 Streamlit ----
+            try {{
+                var clickedDate = pt.data.x[idx];
+                var d = new Date(clickedDate);
+                if (!isNaN(d.getTime())) {{
+                    var yyyy = d.getFullYear();
+                    var mm = String(d.getMonth() + 1).padStart(2, '0');
+                    var dd = String(d.getDate()).padStart(2, '0');
+                    var dateStr = yyyy + '-' + mm + '-' + dd;
+                    var url = new URL(window.top.location.href);
+                    url.searchParams.set('marvis_chart_date', dateStr);
+                    window.top.location.href = url.toString();
+                }}
+            }} catch(e) {{}}
         }});
 
         gd.on('plotly_selected', function(data) {{
@@ -1080,6 +1094,37 @@ def _render_fund(item, theme):
         st.session_state.fund_chart_version += 1
         st.rerun()
 
+    # ---- 当日新闻（点击图表日期触发） ----
+    clicked_date = st.query_params.get("marvis_chart_date", None)
+    if clicked_date:
+        st.markdown("---")
+        st.subheader(f"📰 {clicked_date} 当日资讯")
+        if sentiment_events:
+            day_events = [e for e in sentiment_events if e[0] == clicked_date]
+            if day_events:
+                for _date_str, _score, _title in day_events:
+                    if _score > 0:
+                        st.markdown(
+                            f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
+                            f'border-left:4px solid #2e7d32">'
+                            f'📈 <b>利好</b> (+{_score}) &nbsp; {_title}</div>',
+                            unsafe_allow_html=True)
+                    elif _score < 0:
+                        st.markdown(
+                            f'<div style="background:#ffebee;padding:8px 12px;border-radius:6px;margin:4px 0;'
+                            f'border-left:4px solid #c62828">'
+                            f'📉 <b>利空</b> ({_score}) &nbsp; {_title}</div>',
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            f'<div style="color:#888;padding:4px 12px;margin:2px 0">'
+                            f'➖ 中性 &nbsp; {_title}</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.info("当日无相关新闻")
+        else:
+            st.info("当日无相关新闻（请先开启情绪模式）")
+
     # ---- 交易明细 ----
     _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary)
 
@@ -1224,6 +1269,37 @@ def _render_backtest(item, theme):
     if st.button("重置缩放", key="reset_zoom"):
         st.session_state.chart_version += 1
         st.rerun()
+
+    # ---- 当日新闻（点击图表日期触发） ----
+    clicked_date = st.query_params.get("marvis_chart_date", None)
+    if clicked_date:
+        st.markdown("---")
+        st.subheader(f"📰 {clicked_date} 当日资讯")
+        if sentiment_events:
+            day_events = [e for e in sentiment_events if e[0] == clicked_date]
+            if day_events:
+                for _date_str, _score, _title in day_events:
+                    if _score > 0:
+                        st.markdown(
+                            f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
+                            f'border-left:4px solid #2e7d32">'
+                            f'📈 <b>利好</b> (+{_score}) &nbsp; {_title}</div>',
+                            unsafe_allow_html=True)
+                    elif _score < 0:
+                        st.markdown(
+                            f'<div style="background:#ffebee;padding:8px 12px;border-radius:6px;margin:4px 0;'
+                            f'border-left:4px solid #c62828">'
+                            f'📉 <b>利空</b> ({_score}) &nbsp; {_title}</div>',
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            f'<div style="color:#888;padding:4px 12px;margin:2px 0">'
+                            f'➖ 中性 &nbsp; {_title}</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.info("当日无相关新闻")
+        else:
+            st.info("当日无相关新闻（请先开启情绪模式）")
 
     # ---- 交易明细 ----
     _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary)

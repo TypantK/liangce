@@ -101,6 +101,40 @@ def _search_google_news_rss(query: str, max_results: int = 8) -> list[dict]:
         return []
 
 
+def _fetch_weibo_hot() -> list[dict]:
+    """从微博热搜 API 抓取实时热门话题。"""
+    try:
+        req = urllib.request.Request(
+            "https://weibo.com/ajax/side/hotSearch",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Referer": "https://weibo.com/",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        results = []
+        realtime = data.get("data", {}).get("realtime", [])
+        for item in realtime[:20]:
+            word = item.get("word", "")
+            if word:
+                item_url = item.get("word_scheme", "")
+                if not item_url:
+                    item_url = "https://s.weibo.com/weibo?q=" + urllib.parse.quote(word)
+                results.append({
+                    "title": word,
+                    "snippet": f"微博热搜 - 热度: {item.get('raw_hot', 'N/A')}",
+                    "url": item_url,
+                    "source": "weibo",
+                })
+        logger.info(f"微博热搜抓取成功，共 {len(results)} 条")
+        return results
+    except Exception as e:
+        logger.warning(f"微博热搜抓取失败: {e}")
+        return []
+
+
 def _sample_news(query: str) -> list[dict]:
     """示例新闻数据（当真实搜索不可用时降级使用）。
 
@@ -145,7 +179,7 @@ def fetch_news(query: str, max_results: int = 6) -> list[dict]:
     """
     获取与 query 相关的最新财经新闻。
 
-    返回: [{"title": "...", "snippet": "..."}, ...]
+    返回: [{"title": "...", "snippet": "...", "url": "...", "source": "..."}, ...]
     """
     # 尝试 DuckDuckGo
     results = _search_duckduckgo(query, max_results)
@@ -156,6 +190,11 @@ def fetch_news(query: str, max_results: int = 6) -> list[dict]:
     results = _search_google_news_rss(query, max_results)
     if results:
         return results
+
+    # 尝试微博热搜
+    results = _fetch_weibo_hot()
+    if results:
+        return results[:max_results]
 
     # 降级：使用示例数据
     return _sample_news(query)
