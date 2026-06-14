@@ -8,7 +8,10 @@
 import json
 import urllib.request
 import urllib.parse
+import logging
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
@@ -22,7 +25,8 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-    except Exception:
+    except Exception as e:
+        logger.warning(f"DuckDuckGo 搜索请求失败: {e}")
         return []
 
     results = []
@@ -33,6 +37,8 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
         r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
         html, re.DOTALL | re.IGNORECASE
     )
+    if not items:
+        logger.warning(f"DuckDuckGo HTML 解析未匹配到结果项，页面结构可能已变更(query={query})")
     for url, title, snippet in items[:max_results]:
         title_clean = re.sub(r'<[^>]+>', '', title).strip()
         snippet_clean = re.sub(r'<[^>]+>', '', snippet).strip()

@@ -1,7 +1,14 @@
 #!/bin/bash
 # 「量策」启动脚本
 cd "$(dirname "$0")"
-export PATH="$HOME/Library/Python/3.9/bin:$HOME/nodejs/bin:$PATH"
+
+# 动态获取用户 Python bin 路径，避免硬编码 Python 版本号
+_USER_PYTHON_BIN=$(python3 -m site --user-base 2>/dev/null)/bin
+if [ -d "$_USER_PYTHON_BIN" ]; then
+    export PATH="$_USER_PYTHON_BIN:$HOME/nodejs/bin:$PATH"
+else
+    export PATH="$HOME/Library/Python/3.9/bin:$HOME/nodejs/bin:$PATH"
+fi
 
 PORT=8501
 

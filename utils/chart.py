@@ -476,6 +476,20 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
         hovertemplate='%{x|%Y-%m-%d}<br>净值: %{y:.4f}<extra></extra>',
     ))
 
+    # 点击捕获层：每个数据点放不可见大 marker，与 plot_backtest 交互一致
+    _inv_color = 'rgba(0,0,0,0.01)' if theme == "light" else 'rgba(255,255,255,0.01)'
+    click_x, click_y, click_text = [], [], []
+    for i in range(n):
+        t = dti[i].strftime('%Y-%m-%d')
+        click_x.append(dti[i])
+        click_y.append(float(df['close'].iloc[i]))
+        click_text.append(t)
+    fig.add_trace(go.Scatter(
+        x=click_x, y=click_y, mode='markers',
+        marker=dict(size=40, opacity=0.01, color=_inv_color),
+        hoverinfo='skip', showlegend=False, name='_click_cap', text=click_text,
+    ))
+
     # MA5
     fig.add_trace(go.Scatter(
         x=dti, y=ma5, name="MA5",

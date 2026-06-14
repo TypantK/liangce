@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from core.data_fetcher import STOCK_POOL, get_stock_data
 from core.strategies import STRATEGY_REGISTRY
-from core.optimizer import grid_search, METRIC_LABELS
+from core.optimizer import grid_search, optuna_optimize, METRIC_LABELS
 
 # ---- 深色主题配色（与 chart.py 对齐）----
 BG       = '#131520'
@@ -146,6 +146,20 @@ def render():
         index=0,
     )
 
+    # ========== 优化方式 ==========
+    opt_method = st.sidebar.radio(
+        "优化方式",
+        ["网格搜索", "Optuna 贝叶斯优化"],
+        key="opt_method",
+    )
+
+    n_trials = 50
+    if opt_method == "Optuna 贝叶斯优化":
+        n_trials = st.sidebar.slider(
+            "最大尝试次数 (n_trials)", 10, 200, 50, 10, key="opt_n_trials",
+            help="Optuna 会智能采样，通常 50 次即可逼近最优解",
+        )
+
     # ========== 日期 & 资金 ==========
     st.sidebar.markdown("---")
     c_s, c_e = st.sidebar.columns(2)
@@ -158,6 +172,12 @@ def render():
             "结束", datetime.now(), key="opt_be")
 
     initial_cash = st.sidebar.number_input("初始资金", 10000, 10000000, 100000, 10000, key="opt_cash")
+
+    # ========== 检测关键参数变化，主动清除旧优化结果 ==========
+    _opt_fingerprint = f"{stock_name}|{strategy_name}|{backtest_start}|{backtest_end}|{p1_name}|{p2_name}|{p1_range}|{p2_range}|{metric_key}|{opt_method}|{n_trials}"
+    if st.session_state.get("_opt_last_fingerprint") != _opt_fingerprint:
+        st.session_state.opt_result = None
+        st.session_state._opt_last_fingerprint = _opt_fingerprint
 
     # ========== 开始优化 ==========
     if st.sidebar.button("开始优化", type="primary", use_container_width=True, key="opt_btn"):
@@ -188,16 +208,28 @@ def render():
             progress_bar.progress(i / total)
             status_text.text(f"正在回测... {i}/{total}")
 
-        with st.spinner(f"网格搜索「{strategy_name}」参数组合..."):
-            result = grid_search(
-                data, strat_info["class"], base_params,
-                p1_name, p1_range[0], p1_range[1], p1_def,
-                p2_name, p2_range[0], p2_range[1], p2_def,
-                metric=metric_key,
-                initial_cash=initial_cash,
-                strategy_name=strategy_name,
-                progress_callback=_progress,
-            )
+        with st.spinner(f"{'网格搜索' if opt_method == '网格搜索' else 'Optuna 优化'}「{strategy_name}」参数组合..."):
+            if opt_method == "网格搜索":
+                result = grid_search(
+                    data, strat_info["class"], base_params,
+                    p1_name, p1_range[0], p1_range[1], p1_def,
+                    p2_name, p2_range[0], p2_range[1], p2_def,
+                    metric=metric_key,
+                    initial_cash=initial_cash,
+                    strategy_name=strategy_name,
+                    progress_callback=_progress,
+                )
+            else:
+                result = optuna_optimize(
+                    data, strat_info["class"], base_params,
+                    p1_name, p1_range[0], p1_range[1], p1_def,
+                    p2_name, p2_range[0], p2_range[1], p2_def,
+                    metric=metric_key,
+                    initial_cash=initial_cash,
+                    strategy_name=strategy_name,
+                    progress_callback=_progress,
+                    n_trials=n_trials,
+                )
 
         progress_bar.empty()
         status_text.empty()
@@ -242,8 +274,19 @@ def render():
     else:
         st.warning("未找到有效参数组合（所有回测结果均为无效值）")
 
-    # ---- 全部组合数据表 ----
+    # ---- 全部组合数据 ----
     with st.expander("全部组合数据"):
+        method_tag = result.get("method", "grid")
+        if method_tag == "optuna" and "trial_data" in result:
+            st.caption(f"Optuna 贝叶斯优化共完成 {result['completed']} 次有效回测（共 {result['total']} 次尝试）")
+            df_trial = pd.DataFrame(result["trial_data"])
+            df_trial.columns = [
+                result["param1"], result["param2"], result["best_metric_label"]
+            ]
+            df_trial = df_trial.sort_values(result["best_metric_label"], ascending=False)
+            df_trial = df_trial.reset_index(drop=True)
+            st.dataframe(df_trial, use_container_width=True, hide_index=True)
+
         p1_vals = result["p1_vals"]
         p2_vals = result["p2_vals"]
         matrix = np.array(result["matrix"])

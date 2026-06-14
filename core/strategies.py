@@ -111,9 +111,19 @@ class LinearRegressionSlope(bt.Indicator):
 
 
 # ============================================================
+#  Mixin：统一订单通知
+# ============================================================
+class NotifyOrderMixin:
+    """策略混入类：统一处理订单完成/取消/保证金不足后的清理"""
+    def notify_order(self, order):
+        if order.status in [order.Completed, order.Canceled, order.Margin]:
+            self.order = None
+
+
+# ============================================================
 #  策略 1：双均线交叉
 # ============================================================
-class DualMAStrategy(bt.Strategy):
+class DualMAStrategy(NotifyOrderMixin, bt.Strategy):
     """双均线交叉 + 止盈止损"""
     params = (
         ('fast', 5),
@@ -128,10 +138,6 @@ class DualMAStrategy(bt.Strategy):
         self.crossover = bt.indicators.CrossOver(self.sma_fast, self.sma_slow)
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -151,7 +157,7 @@ class DualMAStrategy(bt.Strategy):
 # ============================================================
 #  策略 2：RSI 超买超卖
 # ============================================================
-class RSIStrategy(bt.Strategy):
+class RSIStrategy(NotifyOrderMixin, bt.Strategy):
     """RSI + 跟踪止损"""
     params = (
         ('rsi_period', 14),
@@ -164,10 +170,6 @@ class RSIStrategy(bt.Strategy):
         self.rsi = bt.indicators.RSI(self.data.close, period=self.params.rsi_period)
         self.order = None
         self.highest = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -188,7 +190,7 @@ class RSIStrategy(bt.Strategy):
 # ============================================================
 #  策略 3：MACD 策略
 # ============================================================
-class MACDStrategy(bt.Strategy):
+class MACDStrategy(NotifyOrderMixin, bt.Strategy):
     """MACD 金叉死叉"""
     params = (
         ('macd_fast', 12),
@@ -208,10 +210,6 @@ class MACDStrategy(bt.Strategy):
         self.order = None
         self.entry_price = 0
 
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
-
     def next(self):
         if self.order:
             return
@@ -230,7 +228,7 @@ class MACDStrategy(bt.Strategy):
 # ============================================================
 #  策略 4：布林带策略
 # ============================================================
-class BollingerStrategy(bt.Strategy):
+class BollingerStrategy(NotifyOrderMixin, bt.Strategy):
     """布林带下轨买入、中轨卖出"""
     params = (
         ('period', 20),
@@ -246,10 +244,6 @@ class BollingerStrategy(bt.Strategy):
         )
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -269,7 +263,7 @@ class BollingerStrategy(bt.Strategy):
 # ============================================================
 #  策略 5：卡尔曼滤波趋势（预测型）
 # ============================================================
-class KalmanTrendStrategy(bt.Strategy):
+class KalmanTrendStrategy(NotifyOrderMixin, bt.Strategy):
     """
     卡尔曼滤波 + 跟踪止损。
     核心理念：卡尔曼滤波从噪声价格中估计出隐藏的"速度"信号。
@@ -291,10 +285,6 @@ class KalmanTrendStrategy(bt.Strategy):
         self.kf_velocity = self.kf.lines.kf_velocity
         self.order = None
         self.highest = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -318,7 +308,7 @@ class KalmanTrendStrategy(bt.Strategy):
 # ============================================================
 #  策略 6：HMA 低延迟均线（预测型）
 # ============================================================
-class HMAStrategy(bt.Strategy):
+class HMAStrategy(NotifyOrderMixin, bt.Strategy):
     """
     Hull Moving Average + EMA 信号线交叉。
     HMA 通过加权移动平均组合大幅降低了传统均线的滞后，
@@ -339,10 +329,6 @@ class HMAStrategy(bt.Strategy):
         self.order = None
         self.entry_price = 0
 
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
-
     def next(self):
         if self.order:
             return
@@ -361,7 +347,7 @@ class HMAStrategy(bt.Strategy):
 # ============================================================
 #  策略 7：线性回归斜率（预测型）
 # ============================================================
-class LinearRegressionSlopeStrategy(bt.Strategy):
+class LinearRegressionSlopeStrategy(NotifyOrderMixin, bt.Strategy):
     """
     线性回归斜率趋势策略。
     对最近 N 期价格拟合回归直线，斜率 > 0 表示上升趋势在加速，
@@ -380,10 +366,6 @@ class LinearRegressionSlopeStrategy(bt.Strategy):
         self.slope_smooth = bt.indicators.EMA(self.slope_raw, period=self.p.smooth_period)
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -404,7 +386,7 @@ class LinearRegressionSlopeStrategy(bt.Strategy):
 # ============================================================
 #  策略 8：一目均衡表（预测型）
 # ============================================================
-class IchimokuStrategy(bt.Strategy):
+class IchimokuStrategy(NotifyOrderMixin, bt.Strategy):
     """
     一目均衡表（Ichimoku Kinko Hyo）。
     核心预测特性：Senkou Span A/B 形成的"云层"被投影到未来 26 期，
@@ -434,10 +416,6 @@ class IchimokuStrategy(bt.Strategy):
         self.senkou_b = self.ichimoku.lines.senkou_span_b
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -470,7 +448,7 @@ class IchimokuStrategy(bt.Strategy):
 # ============================================================
 #  策略 9：唐奇安通道突破（滞后型）
 # ============================================================
-class DonchianChannelStrategy(bt.Strategy):
+class DonchianChannelStrategy(NotifyOrderMixin, bt.Strategy):
     """
     唐奇安通道突破策略（Donchian Channel Breakout）。
     经典海龟交易法则核心：价格突破 N 日最高点做多，跌破 N 日最低点平仓。
@@ -486,10 +464,6 @@ class DonchianChannelStrategy(bt.Strategy):
         self.donchian_low = bt.indicators.Lowest(self.data.low, period=self.p.period)
         self.order = None
         self.highest = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -511,7 +485,7 @@ class DonchianChannelStrategy(bt.Strategy):
 # ============================================================
 #  策略 10：ADX 趋势强度（滞后型）
 # ============================================================
-class ADXTrendStrategy(bt.Strategy):
+class ADXTrendStrategy(NotifyOrderMixin, bt.Strategy):
     """
     ADX 趋势强度策略。
     ADX 不判方向只判「趋势有多强」；方向由 +DI/-DI 决定。
@@ -530,10 +504,6 @@ class ADXTrendStrategy(bt.Strategy):
         self.minus_di = bt.indicators.MinusDI(period=self.p.adx_period)
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -560,7 +530,7 @@ class ADXTrendStrategy(bt.Strategy):
 # ============================================================
 #  策略 11：抛物线 SAR（预测型）
 # ============================================================
-class ParabolicSARStrategy(bt.Strategy):
+class ParabolicSARStrategy(NotifyOrderMixin, bt.Strategy):
     """
     抛物线 SAR 策略。
     PSAR 是动态的止损/反转点，跟随趋势移动。
@@ -580,10 +550,6 @@ class ParabolicSARStrategy(bt.Strategy):
         )
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:
@@ -613,7 +579,7 @@ class ParabolicSARStrategy(bt.Strategy):
 # ============================================================
 #  策略 12：成交量加权 MACD（预测型）
 # ============================================================
-class VWAPMACDStrategy(bt.Strategy):
+class VWAPMACDStrategy(NotifyOrderMixin, bt.Strategy):
     """
     成交量加权 MACD 策略。
     用 VWAP（成交量加权均价）替代收盘价计算 MACD，
@@ -643,10 +609,6 @@ class VWAPMACDStrategy(bt.Strategy):
         self.signal_line = self.macd.lines.signal
         self.order = None
         self.entry_price = 0
-
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
 
     def next(self):
         if self.order:

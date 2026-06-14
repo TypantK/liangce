@@ -112,7 +112,29 @@ def get_fund_nav(code):
     try:
         import akshare as ak
         df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
-        df = df.rename(columns={"净值日期": "date", "单位净值": "nav"})
+
+        # 列名容错：尝试多种常见列名格式
+        date_col = None
+        nav_col = None
+        for col in df.columns:
+            col_lower = col.strip()
+            if col_lower in ("净值日期", "date", "nav_date", "净值日", "日期"):
+                date_col = col
+            elif col_lower in ("单位净值", "nav", "net_value", "净值", "累计净值"):
+                nav_col = col
+
+        if date_col is None:
+            raise ValueError(
+                f"基金 {code} 净值数据中未找到日期列，"
+                f"现有列: {list(df.columns)}"
+            )
+        if nav_col is None:
+            raise ValueError(
+                f"基金 {code} 净值数据中未找到净值列，"
+                f"现有列: {list(df.columns)}"
+            )
+
+        df = df.rename(columns={date_col: "date", nav_col: "nav"})
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
         return df
@@ -162,74 +184,16 @@ def _build_chart_html(fig, version=0, theme="dark", auto_zoom=False):
     <style>
         body {{ margin: 0; padding: 0; background: {_body_bg}; color: {_body_color}; font-family: sans-serif; }}
         #{chart_id} {{ width: 100%; }}
-        #_dbg {{ display: none; }}
     </style>
 </head>
 <body>
-<div id="_dbg">...</div>
 {fig_html}
 <script>
 window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 (function() {{
     var gd = null;
-    var dbg = document.getElementById('_dbg');
     var clickCount = 0;
     var zoomReady = false;
-
-    function log(msg) {{
-        dbg.textContent = msg;
-        console.log('[chart] ' + msg);
-    }}
-
-    var _vLog = [];
-    function vlog(tag, payload) {{
-        var ts = new Date().toISOString().slice(11,23);
-        var entry = '[' + ts + '] ' + tag;
-        if (payload !== undefined) {{
-            try {{ entry += ' ' + JSON.stringify(payload).slice(0,500); }} catch(e) {{ entry += ' ' + String(payload).slice(0,500); }}
-        }}
-        _vLog.unshift(entry);
-        if (_vLog.length > 40) _vLog.length = 40;
-        console.log('[chart-d] ' + entry);
-        dbg.textContent = _vLog.slice(0, 15).join('\\n');
-        scheduleDump();
-    }}
-    function dumpLog() {{ console.table(_vLog.map(function(s) {{ return {{entry:s}}; }})); }}
-
-    var _dumpUrl = 'http://127.0.0.1:19876/log';
-    function dumpToFile() {{
-        var payload = JSON.stringify({{time: new Date().toISOString(),
-            autorange: {{x:(gd._fullLayout||{{}}).xaxis||{{}}.autorange, y:(gd._fullLayout||{{}}).yaxis||{{}}.autorange}},
-            dragmode: (gd._fullLayout||{{}}).dragmode, clickCount: clickCount, log: _vLog}});
-        var img = new Image();
-        img.src = _dumpUrl + '?d=' + encodeURIComponent(payload);
-        img.onerror = function(){{}};
-    }}
-    document.addEventListener('keydown', function(e) {{
-        if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {{ dumpToFile(); }}
-    }});
-    var _dumpTimer = null;
-    function scheduleDump() {{
-        if (_dumpTimer) clearTimeout(_dumpTimer);
-        _dumpTimer = setTimeout(dumpToFile, 1000);
-    }}
-
-    function spyPlotlyEvents() {{
-        var origEmit = gd.emit;
-        gd.emit = function() {{
-            var eventName = arguments[0];
-            if (eventName === 'plotly_click' || eventName === 'plotly_relayout' ||
-                eventName === 'plotly_doubleclick' || eventName === 'plotly_afterplot') {{
-                var hasPoints = '???';
-                if (eventName === 'plotly_click') {{
-                    try {{ hasPoints = arguments[1] && arguments[1].points ? arguments[1].points.length : 0; }} catch(e) {{ hasPoints = 'err'; }}
-                }}
-                vlog('EMIT:' + eventName + ' pts=' + hasPoints);
-            }}
-            return origEmit.apply(this, arguments);
-        }};
-        vlog('spy-installed');
-    }}
 
     function findDateIndex(allX, targetX) {{
         if (!allX || !allX.length) return -1;
@@ -297,7 +261,6 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
     }}
 
     function bindClickHandlers() {{
-        vlog('bindClickHandlers BEGIN');
         gd.removeAllListeners('plotly_click');
         gd.removeAllListeners('plotly_selected');
         gd.removeAllListeners('plotly_doubleclick');
@@ -305,19 +268,16 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         gd.on('plotly_click', function(data) {{
             clickCount++;
             var pts = (data && data.points) ? data.points.length : 0;
-            vlog('CLICK#' + clickCount + ' pts=' + pts);
             if (!pts) return;
             var pt = data.points[0];
             var allX = pt.data.x;
             if (!allX || allX.length === 0) return;
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
-            vlog('ZOOM from=' + idx);
             zoomToRange(allX, idx - 30, idx + 30);
         }});
 
         gd.on('plotly_selected', function(data) {{
-            vlog('SELECT range=' + (data && data.range ? JSON.stringify(data.range) : 'null'));
             if (!data || !data.range || !data.range.x) return;
             if (!data.points || !data.points.length) {{
                 Plotly.relayout(gd, {{'xaxis.range': [data.range.x[0], data.range.x[1]]}});
@@ -329,37 +289,22 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
             var endIdx = findDateIndex(allX, data.range.x[1]);
             if (startIdx >= 0 && endIdx >= 0) zoomToRange(allX, startIdx, endIdx);
         }});
-
-        vlog('bindClickHandlers DONE');
-    }}
-
-    function dumpAutorangeState(tag) {{
-        try {{
-            var la = gd._fullLayout || {{}};
-            var xa = la.xaxis || {{}}, ya = la.yaxis || {{}};
-            vlog('AUTORANGE:' + tag + ' x=' + xa.autorange + ' y=' + ya.autorange +
-                 ' dm=' + la.dragmode + ' xrange=' + JSON.stringify(xa.range).slice(0,80));
-        }} catch(e) {{ vlog('AUTORANGE:' + tag + ' err'); }}
     }}
 
     function setupZoom() {{
-        if (zoomReady || !gd) {{ vlog('setupZoom skip ready=' + zoomReady + ' gd=' + !!gd); return; }}
+        if (zoomReady || !gd) return;
         zoomReady = true;
-        vlog('setupZoom START');
-        spyPlotlyEvents();
         bindClickHandlers();
-        dumpAutorangeState('initial');
 
         var rebindLock = false;
         gd.on('plotly_relayout', function(eventData) {{
-            if (rebindLock) {{ vlog('RELAYOUT skip (locked)'); return; }}
+            if (rebindLock) return;
             rebindLock = true;
             var isAutoscale = eventData && ('xaxis.autorange' in eventData || 'yaxis.autorange' in eventData);
             var delay = isAutoscale ? 300 : 80;
             setTimeout(function() {{
                 if (isAutoscale) {{
                     Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false}});
-                    dumpAutorangeState('after-disable-autorange');
                     bindClickHandlers();
                     var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
                     Plotly.relayout(gd, {{dragmode: cd}});
@@ -373,23 +318,17 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
             }}, delay);
         }});
 
-        log('ready');
         var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
-        vlog('setupZoom warm-up dragmode=' + currentDrag);
 
         if (window.__chartAutoZoom) {{
-            vlog('auto-zoom START (skip warm-up)');
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
             setTimeout(function() {{
                 var btn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
-                if (btn) {{ btn.click(); vlog('auto-zoom zoomout click OK'); }}
-                else {{ vlog('auto-zoom zoomout btn missing'); }}
+                if (btn) btn.click();
             }}, 150);
         }} else {{
             Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
         }}
-        dumpAutorangeState('after-init-disable');
-        vlog('setupZoom DONE');
     }}
 
     function tryInit() {{
@@ -397,7 +336,7 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         if (!gd) gd = document.querySelector('.js-plotly-plot');
         if (!gd) gd = document.querySelector('.plotly-graph-div');
         if (!gd) gd = document.querySelector('[id^="chart_"]');
-        if (!gd) {{ log('no-div'); setTimeout(tryInit, 300); return; }}
+        if (!gd) {{ setTimeout(tryInit, 300); return; }}
         if (gd._fullLayout && gd._fullLayout._initialized) {{
             setupZoom();
         }} else {{
@@ -410,13 +349,9 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
     setTimeout(tryInit, 200);
 
     window.__chartDebug = {{
-        getLog: function() {{ return _vLog; }},
-        dumpLog: dumpLog, dumpToFile: dumpToFile,
         getGd: function() {{ return gd; }},
-        dumpAutorange: function() {{ dumpAutorangeState('manual'); }},
         getClickCount: function() {{ return clickCount; }}
     }};
-    console.log('[chart] Debug API at window.__chartDebug');
 }})();
 </script>
 <!-- cv:{version} -->
@@ -428,15 +363,12 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         var gd = window.__chartDebug && window.__chartDebug.getGd();
         if (!gd) return;
         var key = e.key.toLowerCase();
-        var dbg = document.getElementById('_dbg');
         if (key === 'q') {{
             e.preventDefault();
             Plotly.relayout(gd, {{dragmode: 'zoom'}});
-            if (dbg) {{ dbg.textContent = 'Tool: ZOOM'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
         }} else if (key === 'w') {{
             e.preventDefault();
             Plotly.relayout(gd, {{dragmode: 'pan'}});
-            if (dbg) {{ dbg.textContent = 'Tool: PAN'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
         }} else if (key === 'e') {{
             e.preventDefault();
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
@@ -444,17 +376,14 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
                 var zoomOutBtn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
                 if (zoomOutBtn) zoomOutBtn.click();
             }}, 150);
-            if (dbg) {{ dbg.textContent = 'AUTOSCALE'; setTimeout(function(){{dbg.textContent='...'}},1200); }}
         }} else if (key === 'a') {{
             e.preventDefault();
             var zin = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="in"]');
             if (zin) zin.click();
-            if (dbg) {{ dbg.textContent = 'ZOOM IN (A)'; setTimeout(function(){{dbg.textContent='...'}},800); }}
         }} else if (key === 's') {{
             e.preventDefault();
             var zout = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
             if (zout) zout.click();
-            if (dbg) {{ dbg.textContent = 'ZOOM OUT (S)'; setTimeout(function(){{dbg.textContent='...'}},800); }}
         }}
     }});
 }})();
@@ -589,6 +518,312 @@ def render():
 # ============================================================
 #  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
 # ============================================================
+
+
+# ============================================================
+#  共享组件 — _render_fund / _render_backtest 复用
+# ============================================================
+
+def _get_common_sidebar_params(prefix="", default_sentiment=True, min_cash=1000):
+    """共同侧边栏参数组件。prefix 用于 session_state key 隔离。"""
+    strategy_name = st.sidebar.selectbox(
+        "选择策略", list(STRATEGY_REGISTRY.keys()), key=f"{prefix}s")
+    strat_info = STRATEGY_REGISTRY[strategy_name]
+    st.sidebar.caption(strat_info["desc"])
+
+    st.sidebar.markdown("**回测参数**")
+    backtest_start = st.sidebar.date_input(
+        "起始日期", value=datetime.now() - timedelta(days=365 * 3),
+        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key=f"{prefix}bs_start")
+    backtest_end = st.sidebar.date_input(
+        "结束日期", value=datetime.now(),
+        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key=f"{prefix}bs_end")
+    initial_cash = st.sidebar.number_input(
+        "初始资金（元）", min_cash, 10000000, 100000, 10000, key=f"{prefix}cash")
+
+    st.sidebar.markdown("**策略参数**")
+    params = {}
+    labels = strat_info.get("param_labels", {})
+    for pn, (pmin, pmax, pdef) in strat_info["params"].items():
+        label = labels.get(pn, pn)
+        step = 0.1 if isinstance(pdef, float) else 1
+        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"{prefix}p_{pn}")
+
+    st.sidebar.markdown("**仓位管理**")
+    sizer_name = st.sidebar.selectbox(
+        "仓位管理器", list(SIZER_REGISTRY.keys()), key=f"{prefix}sizer")
+    sizer_info = SIZER_REGISTRY[sizer_name]
+    st.sidebar.caption(sizer_info["desc"])
+
+    sizer_params = {}
+    sizer_labels = sizer_info.get("param_labels", {})
+    for pn, pdef in sizer_info["params"].items():
+        label = sizer_labels.get(pn, pn)
+        if isinstance(pdef, tuple):
+            pmin, pmax, pval = pdef
+            if pn in ("fraction", "risk_pct", "avg_win", "avg_loss", "win_rate", "stop_pct"):
+                pct_val = st.sidebar.slider(
+                    f"{label} (%)", int(pmin * 100), int(pmax * 100), int(pval * 100),
+                    1, key=f"{prefix}sizer_{pn}")
+                sizer_params[pn] = pct_val / 100.0
+            else:
+                step_sz = 0.5 if isinstance(pval, float) else 1
+                sizer_params[pn] = st.sidebar.slider(
+                    label, pmin, pmax, pval, step_sz, key=f"{prefix}sizer_{pn}")
+    sizer_flags = sizer_info.get("flags", {})
+    for fn, fl in sizer_flags.items():
+        sizer_params[fn] = st.sidebar.checkbox(fl, value=False, key=f"{prefix}sizer_{fn}")
+    sizer_instance = sizer_info["class"](**sizer_params)
+
+    st.sidebar.markdown("**情绪增强**")
+    sentiment_mode = st.sidebar.checkbox(
+        "情绪模式", value=default_sentiment,
+        help="开启后实时抓取市场新闻，根据情绪得分过滤交易信号：利好时正常交易，利空时暂停入场",
+        key=f"{prefix}sentiment")
+
+    return {
+        "strategy_name": strategy_name, "strat_info": strat_info,
+        "backtest_start": backtest_start, "backtest_end": backtest_end,
+        "initial_cash": initial_cash, "params": params,
+        "sizer_instance": sizer_instance, "sentiment_mode": sentiment_mode,
+    }
+
+
+def _render_common_metrics(m):
+    """指标卡片展示（2行 × 4列）"""
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
+    c2.metric("最大回撤", m["最大回撤"])
+    c3.metric("夏普比率", m["夏普比率"])
+    c4.metric("胜率", m["胜率"])
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("交易次数", m["交易次数"])
+    c6.metric("最终资金", m["最终资金"])
+    c7.metric("年化收益率", m["年化收益率"])
+    c8.metric("买入持有", m["买入持有"])
+
+
+def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_summary=""):
+    """交易明细表格（HTML 带颜色区分买卖方向）"""
+    if not result["trades"]:
+        st.info("本次回测期间无交易记录")
+        return
+
+    st.subheader("交易明细")
+
+    init_cash_str = result["metrics"].get("初始资金", "¥100,000")
+    running_cash = float(init_cash_str.replace("¥", "").replace(",", "").replace("N/A", "100000"))
+
+    trade_rows = []
+    for t in result["trades"]:
+        buy_qty = t.get("买入数量", 0)
+        sent_mult = t.get("情绪乘数", 1.0)
+        sent_score = t.get("情绪得分", 0.0)
+        sent_desc = t.get("情绪说明", "")
+        base_qty = int(buy_qty / sent_mult) if sent_mult > 0 else int(buy_qty)
+        trade_rows.append({
+            "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
+            "计划数量": str(base_qty), "实际数量": str(int(buy_qty)),
+            "情绪得分": sent_score, "情绪乘数": sent_mult, "仓位调整": sent_desc if sent_desc else "",
+            "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
+        })
+        pnl_str = t["盈亏"]
+        pnl_val = float(pnl_str) if pnl_str else 0.0
+        running_cash += pnl_val
+        trade_rows.append({
+            "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
+            "计划数量": "", "实际数量": str(int(buy_qty)),
+            "情绪得分": 0.0, "情绪乘数": 1.0, "仓位调整": "",
+            "原因": t.get("卖出原因", ""),
+            "余额": f"¥{running_cash:,.0f}",
+            "盈亏金额": f"{pnl_val:+,.2f}",
+        })
+
+    html_parts = [
+        '<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px">',
+        '<colgroup>'
+        '<col style="width:10%"><col style="width:4%"><col style="width:6%">'
+        '<col style="width:10%"><col style="width:10%"><col style="width:12%">'
+        '<col style="width:28%"><col style="width:10%"><col style="width:10%">'
+        '</colgroup>',
+        '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
+        '<th style="padding:6px 8px;text-align:left">时间</th>'
+        '<th style="padding:6px 8px;text-align:center">方向</th>'
+        '<th style="padding:6px 8px;text-align:right">价格</th>'
+        '<th style="padding:6px 8px;text-align:center">计划数量</th>'
+        '<th style="padding:6px 8px;text-align:center">实际数量</th>'
+        '<th style="padding:6px 8px;text-align:center">情绪强度</th>'
+        '<th style="padding:6px 8px;text-align:left">原因</th>'
+        '<th style="padding:6px 8px;text-align:center">仓位调整</th>'
+        '<th style="padding:6px 8px;text-align:right">余额</th>'
+        '</tr>',
+    ]
+
+    for r in trade_rows:
+        if r["方向"] == "buy":
+            bg = "#a5d6a7"
+            dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
+        else:
+            bg = "#ef9a9a"
+            dir_html = '<span style="color:#c62828;font-weight:bold">卖</span>'
+
+        bal = r["余额"]
+        pnl_delta = r.get("盈亏金额", "")
+        if pnl_delta:
+            is_profit = pnl_delta.startswith("+")
+            bal_color = "#2e7d32" if is_profit else "#c62828"
+            bal_html = f'{bal} <span style="color:{bal_color};font-size:11px">({pnl_delta})</span>'
+        else:
+            bal_html = bal
+
+        plan_qty = r.get("计划数量", "")
+        actual_qty = r.get("实际数量", "")
+
+        sent_html = ""
+        if r["方向"] == "buy":
+            sc = r.get("情绪得分", 0.0)
+            sm = r.get("情绪乘数", 1.0)
+            if sc != 0.0 or sm != 1.0:
+                abs_sc = min(abs(sc), 3.0)
+                lightness = 60 - (35 / 3.0) * abs_sc
+                if sc > 0:
+                    color = f"hsl(140,70%,{lightness:.0f}%)"
+                else:
+                    color = f"hsl(0,70%,{lightness:.0f}%)"
+                sent_html = f'<span style="color:{color};font-weight:bold">{sc:+.1f}(×{sm:.1f})</span>'
+
+        adj = r.get("仓位调整", "")
+
+        row = f'<tr style="background:{bg};color:#1a1a1a">'
+        row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["时间"]}</td>'
+        row += f'<td style="padding:6px 8px;text-align:center">{dir_html}</td>'
+        row += f'<td style="padding:6px 8px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
+        row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{plan_qty}</td>'
+        row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{actual_qty}</td>'
+        row += f'<td style="padding:6px 8px;text-align:center">{sent_html}</td>'
+        row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["原因"]}</td>'
+        row += f'<td style="padding:6px 8px;color:#1a1a1a;font-size:12px;white-space:nowrap">{adj}</td>'
+        row += f'<td style="padding:6px 8px;text-align:right;white-space:nowrap">{bal_html}</td>'
+        row += '</tr>'
+        html_parts.append(row)
+
+    html_parts.append('</table>')
+    st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
+
+    if sentiment_mode and raw_news:
+        with st.expander(f"情绪事件来源：{sentiment_summary}"):
+            for item in raw_news:
+                title = item.get("title", "")
+                url = item.get("url", "")
+                snippet = item.get("snippet", "")
+                if url:
+                    link_text = title if title else (snippet[:60] + "…" if snippet else "查看原文")
+                    st.markdown(f"- [{link_text}]({url})")
+                elif title:
+                    st.markdown(f"- {title}")
+                if snippet:
+                    st.caption(snippet[:150])
+
+
+def _render_compare_section(full_data, initial_cash, strategy_name, start_dt, end_dt,
+                            sentiment_events, sizer_instance, sentiment_mode, item_label):
+    """策略横向对比：所有策略默认参数 vs 买入持有基准"""
+    st.markdown("---")
+    st.subheader("策略横向对比")
+    st.caption(f"同一{item_label}、同一时段、同一初始资金下，各策略使用默认参数的回测表现")
+
+    compare_rows = []
+    total_strategies = len(STRATEGY_REGISTRY)
+    compare_progress = st.progress(0)
+    compare_status = st.empty()
+    for i, (s_name, s_info) in enumerate(STRATEGY_REGISTRY.items()):
+        default_params = {pn: prange[2] for pn, prange in s_info["params"].items()}
+        try:
+            s_result = run_backtest(
+                full_data, s_info["class"], default_params,
+                initial_cash=initial_cash, strategy_name=s_name,
+                trade_start=start_dt, trade_end=end_dt,
+                sentiment_events=sentiment_events,
+                position_sizer=sizer_instance)
+            m = s_result["metrics"]
+        except Exception:
+            continue
+        is_current = (s_name == strategy_name)
+        compare_rows.append({
+            "策略": f"{'★ ' if is_current else ''}{s_name}",
+            "总收益率": m["总收益率"],
+            "年化收益率": m["年化收益率"],
+            "最大回撤": m["最大回撤"],
+            "夏普比率": m["夏普比率"],
+            "胜率": m["胜率"],
+            "交易次数": m["交易次数"],
+            "最终资金": m["最终资金"],
+            "买入持有": m["买入持有"],
+            "_current": is_current,
+            "_return_val": _parse_pct(m["总收益率"]),
+        })
+        compare_progress.progress((i + 1) / total_strategies)
+        compare_status.text(f"正在对比策略... {i + 1}/{total_strategies}")
+
+    compare_progress.empty()
+    compare_status.empty()
+
+    bh_data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
+    bh_return = 0.0
+    bh_annual_return = 0.0
+    bh_max_dd = 0.0
+    bh_final_cash = initial_cash
+    if len(bh_data) > 1:
+        first_close = float(bh_data.iloc[0]["close"])
+        last_close = float(bh_data.iloc[-1]["close"])
+        if first_close > 0:
+            bh_return = (last_close - first_close) / first_close * 100
+            days = (bh_data.index[-1] - bh_data.index[0]).days
+            years = max(days / 365.25, 1 / 365.25)
+            bh_annual_return = (((last_close / first_close) ** (1 / years)) - 1) * 100
+            close_prices = bh_data["close"].values
+            peak = float(close_prices[0])
+            bh_max_dd = 0.0
+            for p in close_prices:
+                p_val = float(p)
+                if p_val > peak:
+                    peak = p_val
+                dd = (peak - p_val) / peak * 100
+                if dd > bh_max_dd:
+                    bh_max_dd = dd
+            bh_final_cash = initial_cash * (1 + bh_return / 100)
+
+    compare_rows.append({
+        "策略": "📊 买入持有",
+        "总收益率": f"{bh_return:.2f}%",
+        "年化收益率": f"{bh_annual_return:.2f}%",
+        "最大回撤": f"{bh_max_dd:.2f}%",
+        "夏普比率": "—",
+        "胜率": "—",
+        "交易次数": "0",
+        "最终资金": f"¥{bh_final_cash:,.2f}",
+        "买入持有": f"{bh_return:.2f}%",
+        "_current": False,
+        "_return_val": bh_return,
+    })
+
+    compare_rows.sort(key=lambda r: r["_return_val"], reverse=True)
+    compare_df = pd.DataFrame(compare_rows)
+    display_cols = ["策略", "总收益率", "年化收益率", "最大回撤", "夏普比率", "胜率", "交易次数", "最终资金", "买入持有"]
+    st.dataframe(
+        compare_df[display_cols], use_container_width=True, hide_index=True,
+        column_config={
+            "总收益率": st.column_config.NumberColumn(format="%.2f%%", help="策略回测期间的总盈亏百分比，已扣除交易费用"),
+            "年化收益率": st.column_config.NumberColumn(format="%.2f%%", help="按复利折算的年均收益率"),
+            "最大回撤": st.column_config.NumberColumn(format="%.2f%%", help="期间净值从最高点到最低点的最大跌幅"),
+            "夏普比率": st.column_config.NumberColumn(format="%.2f", help="风险调整后收益，越大越好"),
+            "胜率": st.column_config.NumberColumn(format="%.1f%%", help="盈利交易次数占总交易次数的比例"),
+            "最终资金": st.column_config.NumberColumn(format="¥%.2f"),
+            "买入持有": st.column_config.NumberColumn(format="%.2f%%", help="不进行任何交易，从期初持有到期末的收益率"),
+        })
+    st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
+
+    _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt)
 def _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt):
     """横向对比复盘分析：解释排名原因"""
     if compare_df.empty or len(compare_df) < 2:
@@ -715,7 +950,6 @@ def _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh
 
     st.info("\n".join(lines))
 
-
 # ============================================================
 #  _render_fund  — 基金策略回测（侧边栏参数 + 主区图表）
 # ============================================================
@@ -725,69 +959,18 @@ def _render_fund(item, theme):
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**{item['name']}**  ({item['code']})\n\n*[基金]*")
 
-    # ---- 侧边栏：策略选择 ----
-    strategy_name = st.sidebar.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="fund_s")
-    strat_info = STRATEGY_REGISTRY[strategy_name]
-    st.sidebar.caption(strat_info["desc"])
+    # ---- 侧边栏：共享参数组件 ----
+    sb = _get_common_sidebar_params(prefix="fund_", default_sentiment=True, min_cash=1000)
+    strategy_name = sb["strategy_name"]
+    strat_info = sb["strat_info"]
+    backtest_start = sb["backtest_start"]
+    backtest_end = sb["backtest_end"]
+    initial_cash = sb["initial_cash"]
+    params = sb["params"]
+    sizer_instance = sb["sizer_instance"]
+    sentiment_mode = sb["sentiment_mode"]
 
-    # ---- 侧边栏：日期与资金 ----
-    st.sidebar.markdown("**回测参数**")
-    backtest_start = st.sidebar.date_input(
-        "起始日期", value=datetime.now() - timedelta(days=365 * 3),
-        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_start",
-    )
-    backtest_end = st.sidebar.date_input(
-        "结束日期", value=datetime.now(),
-        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="fund_bs_end",
-    )
-    initial_cash = st.sidebar.number_input("初始资金（元）", 1000, 10000000, 100000, 10000, key="fund_cash")
-
-    # ---- 侧边栏：策略参数滑块 ----
-    st.sidebar.markdown("**策略参数**")
-    params = {}
-    labels = strat_info.get("param_labels", {})
-    for pn, (pmin, pmax, pdef) in strat_info["params"].items():
-        label = labels.get(pn, pn)
-        step = 0.1 if isinstance(pdef, float) else 1
-        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"fund_p_{pn}")
-
-    # ---- 侧边栏：仓位管理 ----
-    st.sidebar.markdown("**仓位管理**")
-    sizer_name = st.sidebar.selectbox(
-        "仓位管理器", list(SIZER_REGISTRY.keys()), key="fund_sizer")
-    sizer_info = SIZER_REGISTRY[sizer_name]
-    st.sidebar.caption(sizer_info["desc"])
-
-    sizer_params = {}
-    sizer_labels = sizer_info.get("param_labels", {})
-    for pn, pdef in sizer_info["params"].items():
-        label = sizer_labels.get(pn, pn)
-        if isinstance(pdef, tuple):
-            pmin, pmax, pval = pdef
-            if pn in ("fraction", "risk_pct", "avg_win", "avg_loss", "win_rate", "stop_pct"):
-                pct_val = st.sidebar.slider(
-                    f"{label} (%)", int(pmin * 100), int(pmax * 100), int(pval * 100),
-                    1, key=f"fund_sizer_{pn}",
-                )
-                sizer_params[pn] = pct_val / 100.0
-            else:
-                step_sz = 0.5 if isinstance(pval, float) else 1
-                sizer_params[pn] = st.sidebar.slider(
-                    label, pmin, pmax, pval, step_sz, key=f"fund_sizer_{pn}")
-    sizer_flags = sizer_info.get("flags", {})
-    for fn, fl in sizer_flags.items():
-        sizer_params[fn] = st.sidebar.checkbox(fl, value=False, key=f"fund_sizer_{fn}")
-
-    sizer_instance = sizer_info["class"](**sizer_params)
-
-    # ---- 侧边栏：情绪模式 ----
-    st.sidebar.markdown("**情绪增强**")
-    sentiment_mode = st.sidebar.checkbox(
-        "情绪模式",
-        value=True,
-        help="开启后实时抓取市场新闻，根据情绪得分过滤交易信号：利好时正常交易，利空时暂停入场",
-        key="fund_sentiment",
-    )
+    # ---- 情绪事件抓取（基金特有） ----
     sentiment_events = None
     raw_news = None
     sentiment_summary = ""
@@ -821,7 +1004,6 @@ def _render_fund(item, theme):
     if sentiment_mode and sentiment_events is not None:
         price_events = generate_events_from_price(full_data, item["name"], target_count=30)
         sentiment_events.extend(price_events)
-        # 去重 + 按日期排序
         seen = set()
         deduped = []
         for e in sorted(sentiment_events, key=lambda x: x[0]):
@@ -846,7 +1028,7 @@ def _render_fund(item, theme):
         st.session_state.fund_chart_version = st.session_state.get("fund_chart_version", 0) + 1
         st.session_state["_fund_fp"] = fp
 
-    # ---- 运行回测（全量数据供指标预热，交易窗口限制实际下单） ----
+    # ---- 运行回测 ----
     with st.spinner(f"运行「{strategy_name}」..."):
         result = run_backtest(full_data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name,
@@ -854,18 +1036,8 @@ def _render_fund(item, theme):
                               sentiment_events=sentiment_events,
                               position_sizer=sizer_instance)
 
-    # ---- 主区域顶部：收益指标（2行 × 4列） ----
-    m = result["metrics"]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    c2.metric("最大回撤", m["最大回撤"])
-    c3.metric("夏普比率", m["夏普比率"])
-    c4.metric("胜率", m["胜率"])
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("交易次数", m["交易次数"])
-    c6.metric("最终资金", m["最终资金"])
-    c7.metric("年化收益率", m["年化收益率"])
-    c8.metric("买入持有", m["买入持有"])
+    # ---- 指标卡片 ----
+    _render_common_metrics(result["metrics"])
 
     # ======== 主区域：图表 + 明细 ========
     st.caption(
@@ -908,227 +1080,12 @@ def _render_fund(item, theme):
         st.session_state.fund_chart_version += 1
         st.rerun()
 
-    if result["trades"]:
-        st.subheader("交易明细")
-
-        # 拆分买卖为独立行
-        # 计算逐笔余额
-        init_cash_str = result["metrics"].get("初始资金", "¥100,000")
-        running_cash = float(init_cash_str.replace("¥", "").replace(",", "").replace("N/A", "100000"))
-
-        trade_rows = []
-        for t in result["trades"]:
-            buy_qty = t.get("买入数量", 0)
-            sent_mult = t.get("情绪乘数", 1.0)
-            sent_score = t.get("情绪得分", 0.0)
-            sent_desc = t.get("情绪说明", "")
-            # 计划数量 = Base Sizer 原始股数
-            base_qty = int(buy_qty / sent_mult) if sent_mult > 0 else int(buy_qty)
-            # 买入行
-            trade_rows.append({
-                "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
-                "计划数量": str(base_qty),
-                "实际数量": str(int(buy_qty)),
-                "情绪得分": sent_score, "情绪乘数": sent_mult, "仓位调整": sent_desc if sent_desc else "",
-                "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
-            })
-            pnl_str = t["盈亏"]
-            pnl_val = float(pnl_str) if pnl_str else 0.0
-            running_cash += pnl_val
-            # 卖出行
-            trade_rows.append({
-                "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
-                "计划数量": "", "实际数量": str(int(buy_qty)),
-                "情绪得分": 0.0, "情绪乘数": 1.0, "仓位调整": "",
-                "原因": t.get("卖出原因", ""),
-                "余额": f"¥{running_cash:,.0f}",
-                "盈亏金额": f"{pnl_val:+,.2f}",
-            })
-
-        # 构建带颜色区分的 HTML 表格
-        html_parts = [
-            '<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px">',
-            '<colgroup>'
-            '<col style="width:10%"><col style="width:4%"><col style="width:6%">'
-            '<col style="width:10%"><col style="width:10%"><col style="width:12%">'
-            '<col style="width:28%"><col style="width:10%"><col style="width:10%">'
-            '</colgroup>',
-            '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
-            '<th style="padding:6px 8px;text-align:left">时间</th>'
-            '<th style="padding:6px 8px;text-align:center">方向</th>'
-            '<th style="padding:6px 8px;text-align:right">价格</th>'
-            '<th style="padding:6px 8px;text-align:center">计划数量</th>'
-            '<th style="padding:6px 8px;text-align:center">实际数量</th>'
-            '<th style="padding:6px 8px;text-align:center">情绪强度</th>'
-            '<th style="padding:6px 8px;text-align:left">原因</th>'
-            '<th style="padding:6px 8px;text-align:center">仓位调整</th>'
-            '<th style="padding:6px 8px;text-align:right">余额</th>'
-            '</tr>',
-        ]
-
-        for r in trade_rows:
-            if r["方向"] == "buy":
-                bg = "#a5d6a7"
-                dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
-            else:
-                bg = "#ef9a9a"
-                dir_html = '<span style="color:#c62828;font-weight:bold">卖</span>'
-
-            bal = r["余额"]
-            pnl_delta = r.get("盈亏金额", "")
-            if pnl_delta:
-                is_profit = pnl_delta.startswith("+")
-                bal_color = "#2e7d32" if is_profit else "#c62828"
-                bal_html = f'{bal} <span style="color:{bal_color};font-size:11px">({pnl_delta})</span>'
-            else:
-                bal_html = bal
-
-            plan_qty = r.get("计划数量", "")
-            actual_qty = r.get("实际数量", "")
-
-            # 情绪强度列：买入行显示分数+乘数，卖出行留空
-            sent_html = ""
-            if r["方向"] == "buy":
-                sc = r.get("情绪得分", 0.0)
-                sm = r.get("情绪乘数", 1.0)
-                if sc != 0.0 or sm != 1.0:
-                    abs_sc = min(abs(sc), 3.0)
-                    lightness = 60 - (35 / 3.0) * abs_sc  # 0→60%, ≥3→25%
-                    if sc > 0:
-                        color = f"hsl(140,70%,{lightness:.0f}%)"
-                    else:
-                        color = f"hsl(0,70%,{lightness:.0f}%)"
-                    sent_html = f'<span style="color:{color};font-weight:bold">{sc:+.1f}(×{sm:.1f})</span>'
-
-            adj = r.get("仓位调整", "")
-
-            row = f'<tr style="background:{bg};color:#1a1a1a">'
-            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["时间"]}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center">{dir_html}</td>'
-            row += f'<td style="padding:6px 8px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{plan_qty}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{actual_qty}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center">{sent_html}</td>'
-            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["原因"]}</td>'
-            row += f'<td style="padding:6px 8px;color:#1a1a1a;font-size:12px;white-space:nowrap">{adj}</td>'
-            row += f'<td style="padding:6px 8px;text-align:right;white-space:nowrap">{bal_html}</td>'
-            row += '</tr>'
-            html_parts.append(row)
-
-        html_parts.append('</table>')
-        st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
-
-        # 情绪事件来源展开
-        if sentiment_mode and raw_news:
-            with st.expander(f"情绪事件来源：{sentiment_summary}"):
-                for item in raw_news:
-                    title = item.get("title", "")
-                    url = item.get("url", "")
-                    snippet = item.get("snippet", "")
-                    if url:
-                        link_text = title if title else (snippet[:60] + "…" if snippet else "查看原文")
-                        st.markdown(f"- [{link_text}]({url})")
-                    elif title:
-                        st.markdown(f"- {title}")
-                    if snippet:
-                        st.caption(snippet[:150])
-    else:
-        st.info("本次回测期间无交易记录")
+    # ---- 交易明细 ----
+    _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary)
 
     # ---- 策略横向对比 ----
-    st.markdown("---")
-    st.subheader("策略横向对比")
-    st.caption("同一基金、同一时段、同一初始资金下，各策略使用默认参数的回测表现")
-
-    compare_rows = []
-    for s_name, s_info in STRATEGY_REGISTRY.items():
-        # 提取默认参数
-        default_params = {pn: prange[2] for pn, prange in s_info["params"].items()}
-        try:
-            s_result = run_backtest(
-                full_data, s_info["class"], default_params,
-                initial_cash=initial_cash, strategy_name=s_name,
-                trade_start=start_dt, trade_end=end_dt,
-                sentiment_events=sentiment_events,
-                position_sizer=sizer_instance,
-            )
-            m = s_result["metrics"]
-        except Exception:
-            continue
-        is_current = (s_name == strategy_name)
-        compare_rows.append({
-            "策略": f"{'★ ' if is_current else ''}{s_name}",
-            "总收益率": m["总收益率"],
-            "年化收益率": m["年化收益率"],
-            "最大回撤": m["最大回撤"],
-            "夏普比率": m["夏普比率"],
-            "胜率": m["胜率"],
-            "交易次数": m["交易次数"],
-            "最终资金": m["最终资金"],
-            "买入持有": m["买入持有"],
-            "_current": is_current,
-            "_return_val": _parse_pct(m["总收益率"]),
-        })
-
-    # ---- 买入持有基准行 ----
-    bh_data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
-    bh_return = 0.0
-    bh_annual_return = 0.0
-    bh_max_dd = 0.0
-    bh_final_cash = initial_cash
-    if len(bh_data) > 1:
-        first_open = float(bh_data.iloc[0]["open"])
-        last_close = float(bh_data.iloc[-1]["close"])
-        if first_open > 0:
-            bh_return = (last_close - first_open) / first_open * 100
-            days = (bh_data.index[-1] - bh_data.index[0]).days
-            years = max(days / 365.25, 1 / 365.25)
-            bh_annual_return = (((last_close / first_open) ** (1 / years)) - 1) * 100
-            close_prices = bh_data["close"].values
-            peak = float(close_prices[0])
-            bh_max_dd = 0.0
-            for p in close_prices:
-                p_val = float(p)
-                if p_val > peak:
-                    peak = p_val
-                dd = (peak - p_val) / peak * 100
-                if dd > bh_max_dd:
-                    bh_max_dd = dd
-            bh_final_cash = initial_cash * (1 + bh_return / 100)
-
-    compare_rows.append({
-        "策略": "📊 买入持有",
-        "总收益率": f"{bh_return:.2f}%",
-        "年化收益率": f"{bh_annual_return:.2f}%",
-        "最大回撤": f"{bh_max_dd:.2f}%",
-        "夏普比率": "—",
-        "胜率": "—",
-        "交易次数": "0",
-        "最终资金": f"¥{bh_final_cash:,.2f}",
-        "买入持有": f"{bh_return:.2f}%",
-        "_current": False,
-        "_return_val": bh_return,
-    })
-
-    compare_rows.sort(key=lambda r: r["_return_val"], reverse=True)
-    compare_df = pd.DataFrame(compare_rows)
-    display_cols = ["策略", "总收益率", "年化收益率", "最大回撤", "夏普比率", "胜率", "交易次数", "最终资金", "买入持有"]
-    st.dataframe(
-        compare_df[display_cols], use_container_width=True, hide_index=True,
-        column_config={
-            "总收益率": st.column_config.NumberColumn(format="%.2f%%", help="策略回测期间的总盈亏百分比，已扣除交易费用"),
-            "年化收益率": st.column_config.NumberColumn(format="%.2f%%", help="按复利折算的年均收益率"),
-            "最大回撤": st.column_config.NumberColumn(format="%.2f%%", help="期间净值从最高点到最低点的最大跌幅"),
-            "夏普比率": st.column_config.NumberColumn(format="%.2f", help="风险调整后收益，越大越好"),
-            "胜率": st.column_config.NumberColumn(format="%.1f%%", help="盈利交易次数占总交易次数的比例"),
-            "最终资金": st.column_config.NumberColumn(format="¥%.2f"),
-            "买入持有": st.column_config.NumberColumn(format="%.2f%%", help="不进行任何交易，从期初持有到期末的收益率"),
-        }
-    )
-    st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
-
-    _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt)
-
+    _render_compare_section(full_data, initial_cash, strategy_name, start_dt, end_dt,
+                            sentiment_events, sizer_instance, sentiment_mode, "基金")
 
 # ============================================================
 #  _render_backtest  — 股票回测（侧边栏参数 + 主区 K 线）
@@ -1143,69 +1100,18 @@ def _render_backtest(item, theme):
     else:
         st.sidebar.markdown("*[演示数据 — 模拟走势]*")
 
-    # ---- 侧边栏：策略选择 ----
-    strategy_name = st.sidebar.selectbox("选择策略", list(STRATEGY_REGISTRY.keys()), key="s")
-    strat_info = STRATEGY_REGISTRY[strategy_name]
-    st.sidebar.caption(strat_info["desc"])
+    # ---- 侧边栏：共享参数组件 ----
+    sb = _get_common_sidebar_params(prefix="", default_sentiment=False, min_cash=10000)
+    strategy_name = sb["strategy_name"]
+    strat_info = sb["strat_info"]
+    backtest_start = sb["backtest_start"]
+    backtest_end = sb["backtest_end"]
+    initial_cash = sb["initial_cash"]
+    params = sb["params"]
+    sizer_instance = sb["sizer_instance"]
+    sentiment_mode = sb["sentiment_mode"]
 
-    # ---- 侧边栏：日期与资金 ----
-    st.sidebar.markdown("**回测参数**")
-    backtest_start = st.sidebar.date_input(
-        "起始日期", value=datetime.now() - timedelta(days=365),
-        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_start",
-    )
-    backtest_end = st.sidebar.date_input(
-        "结束日期", value=datetime.now(),
-        min_value=datetime(2000, 1, 1), max_value=datetime.now(), key="bs_end",
-    )
-    initial_cash = st.sidebar.number_input("初始资金（元）", 10000, 10000000, 100000, 10000, key="cash")
-
-    # ---- 侧边栏：策略参数滑块 ----
-    st.sidebar.markdown("**策略参数**")
-    params = {}
-    labels = strat_info.get("param_labels", {})
-    for pn, (pmin, pmax, pdef) in strat_info["params"].items():
-        label = labels.get(pn, pn)
-        step = 0.1 if isinstance(pdef, float) else 1
-        params[pn] = st.sidebar.slider(label, pmin, pmax, pdef, step, key=f"p_{pn}")
-
-    # ---- 侧边栏：仓位管理 ----
-    st.sidebar.markdown("**仓位管理**")
-    sizer_name = st.sidebar.selectbox(
-        "仓位管理器", list(SIZER_REGISTRY.keys()), key="sizer")
-    sizer_info = SIZER_REGISTRY[sizer_name]
-    st.sidebar.caption(sizer_info["desc"])
-
-    sizer_params = {}
-    sizer_labels = sizer_info.get("param_labels", {})
-    for pn, pdef in sizer_info["params"].items():
-        label = sizer_labels.get(pn, pn)
-        if isinstance(pdef, tuple):
-            pmin, pmax, pval = pdef
-            if pn in ("fraction", "risk_pct", "avg_win", "avg_loss", "win_rate", "stop_pct"):
-                pct_val = st.sidebar.slider(
-                    f"{label} (%)", int(pmin * 100), int(pmax * 100), int(pval * 100),
-                    1, key=f"sizer_{pn}",
-                )
-                sizer_params[pn] = pct_val / 100.0
-            else:
-                step_sz = 0.5 if isinstance(pval, float) else 1
-                sizer_params[pn] = st.sidebar.slider(
-                    label, pmin, pmax, pval, step_sz, key=f"sizer_{pn}")
-    sizer_flags = sizer_info.get("flags", {})
-    for fn, fl in sizer_flags.items():
-        sizer_params[fn] = st.sidebar.checkbox(fl, value=False, key=f"sizer_{fn}")
-
-    sizer_instance = sizer_info["class"](**sizer_params)
-
-    # ---- 侧边栏：情绪模式 ----
-    st.sidebar.markdown("**情绪增强**")
-    sentiment_mode = st.sidebar.checkbox(
-        "情绪模式",
-        value=False,
-        help="开启后实时抓取市场新闻，根据情绪得分过滤交易信号：利好时正常交易，利空时暂停入场",
-        key="stock_sentiment",
-    )
+    # ---- 情绪事件抓取（股票特有） ----
     sentiment_events = None
     raw_news = None
     sentiment_summary = ""
@@ -1240,7 +1146,6 @@ def _render_backtest(item, theme):
     if sentiment_mode and sentiment_events is not None:
         price_events = generate_events_from_price(full_data, item["name"], target_count=30)
         sentiment_events.extend(price_events)
-        # 去重 + 按日期排序
         seen = set()
         deduped = []
         for e in sorted(sentiment_events, key=lambda x: x[0]):
@@ -1265,7 +1170,7 @@ def _render_backtest(item, theme):
         st.session_state.chart_version = st.session_state.get("chart_version", 0) + 1
         st.session_state["_stock_fp"] = fp
 
-    # ---- 运行回测（全量数据供指标预热，交易窗口限制实际下单） ----
+    # ---- 运行回测 ----
     with st.spinner(f"运行「{strategy_name}」..."):
         result = run_backtest(full_data, strat_info["class"], params,
                               initial_cash=initial_cash, strategy_name=strategy_name,
@@ -1273,18 +1178,8 @@ def _render_backtest(item, theme):
                               sentiment_events=sentiment_events,
                               position_sizer=sizer_instance)
 
-    # ---- 主区域顶部：收益指标（2行 × 4列） ----
-    m = result["metrics"]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("总收益率", m["总收益率"], delta=m.get("超额收益", ""))
-    c2.metric("最大回撤", m["最大回撤"])
-    c3.metric("夏普比率", m["夏普比率"])
-    c4.metric("胜率", m["胜率"])
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("交易次数", m["交易次数"])
-    c6.metric("最终资金", m["最终资金"])
-    c7.metric("年化收益率", m["年化收益率"])
-    c8.metric("买入持有", m["买入持有"])
+    # ---- 指标卡片 ----
+    _render_common_metrics(result["metrics"])
 
     # ======== 主区域：K 线 + 明细 ========
     if is_demo:
@@ -1330,222 +1225,9 @@ def _render_backtest(item, theme):
         st.session_state.chart_version += 1
         st.rerun()
 
-    if result["trades"]:
-        st.subheader("交易明细")
-
-        # 拆分买卖为独立行
-        # 计算逐笔余额
-        init_cash_str = result["metrics"].get("初始资金", "¥100,000")
-        running_cash = float(init_cash_str.replace("¥", "").replace(",", "").replace("N/A", "100000"))
-
-        trade_rows = []
-        for t in result["trades"]:
-            buy_qty = t.get("买入数量", 0)
-            sent_mult = t.get("情绪乘数", 1.0)
-            sent_score = t.get("情绪得分", 0.0)
-            sent_desc = t.get("情绪说明", "")
-            # 计划数量 = Base Sizer 原始股数
-            base_qty = int(buy_qty / sent_mult) if sent_mult > 0 else int(buy_qty)
-            # 买入行
-            trade_rows.append({
-                "时间": t["买入时间"], "方向": "buy", "价格": t["买入价"],
-                "计划数量": str(base_qty),
-                "实际数量": str(int(buy_qty)),
-                "情绪得分": sent_score, "情绪乘数": sent_mult, "仓位调整": sent_desc if sent_desc else "",
-                "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
-            })
-            pnl_str = t["盈亏"]
-            pnl_val = float(pnl_str) if pnl_str else 0.0
-            running_cash += pnl_val
-            # 卖出行
-            trade_rows.append({
-                "时间": t["卖出时间"], "方向": "sell", "价格": t["卖出价"],
-                "计划数量": "", "实际数量": str(int(buy_qty)),
-                "情绪得分": 0.0, "情绪乘数": 1.0, "仓位调整": "",
-                "原因": t.get("卖出原因", ""),
-                "余额": f"¥{running_cash:,.0f}",
-                "盈亏金额": f"{pnl_val:+,.2f}",
-            })
-
-        # 构建带颜色区分的 HTML 表格
-        html_parts = [
-            '<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px">',
-            '<colgroup>'
-            '<col style="width:10%"><col style="width:4%"><col style="width:6%">'
-            '<col style="width:10%"><col style="width:10%"><col style="width:12%">'
-            '<col style="width:28%"><col style="width:10%"><col style="width:10%">'
-            '</colgroup>',
-            '<tr style="background:#e0e0e0;font-weight:bold;color:#1a1a1a">'
-            '<th style="padding:6px 8px;text-align:left">时间</th>'
-            '<th style="padding:6px 8px;text-align:center">方向</th>'
-            '<th style="padding:6px 8px;text-align:right">价格</th>'
-            '<th style="padding:6px 8px;text-align:center">计划数量</th>'
-            '<th style="padding:6px 8px;text-align:center">实际数量</th>'
-            '<th style="padding:6px 8px;text-align:center">情绪强度</th>'
-            '<th style="padding:6px 8px;text-align:left">原因</th>'
-            '<th style="padding:6px 8px;text-align:center">仓位调整</th>'
-            '<th style="padding:6px 8px;text-align:right">余额</th>'
-            '</tr>',
-        ]
-
-        for r in trade_rows:
-            if r["方向"] == "buy":
-                bg = "#a5d6a7"
-                dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
-            else:
-                bg = "#ef9a9a"
-                dir_html = '<span style="color:#c62828;font-weight:bold">卖</span>'
-
-            bal = r["余额"]
-            pnl_delta = r.get("盈亏金额", "")
-            if pnl_delta:
-                is_profit = pnl_delta.startswith("+")
-                bal_color = "#2e7d32" if is_profit else "#c62828"
-                bal_html = f'{bal} <span style="color:{bal_color};font-size:11px">({pnl_delta})</span>'
-            else:
-                bal_html = bal
-
-            plan_qty = r.get("计划数量", "")
-            actual_qty = r.get("实际数量", "")
-
-            # 情绪强度列：买入行显示分数+乘数，卖出行留空
-            sent_html = ""
-            if r["方向"] == "buy":
-                sc = r.get("情绪得分", 0.0)
-                sm = r.get("情绪乘数", 1.0)
-                if sc != 0.0 or sm != 1.0:
-                    abs_sc = min(abs(sc), 3.0)
-                    lightness = 60 - (35 / 3.0) * abs_sc  # 0→60%, ≥3→25%
-                    if sc > 0:
-                        color = f"hsl(140,70%,{lightness:.0f}%)"
-                    else:
-                        color = f"hsl(0,70%,{lightness:.0f}%)"
-                    sent_html = f'<span style="color:{color};font-weight:bold">{sc:+.1f}(×{sm:.1f})</span>'
-
-            adj = r.get("仓位调整", "")
-
-            row = f'<tr style="background:{bg};color:#1a1a1a">'
-            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["时间"]}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center">{dir_html}</td>'
-            row += f'<td style="padding:6px 8px;text-align:right;color:#1a1a1a">{r["价格"]}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{plan_qty}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center;color:#1a1a1a">{actual_qty}</td>'
-            row += f'<td style="padding:6px 8px;text-align:center">{sent_html}</td>'
-            row += f'<td style="padding:6px 8px;color:#1a1a1a">{r["原因"]}</td>'
-            row += f'<td style="padding:6px 8px;color:#1a1a1a;font-size:12px;white-space:nowrap">{adj}</td>'
-            row += f'<td style="padding:6px 8px;text-align:right;white-space:nowrap">{bal_html}</td>'
-            row += '</tr>'
-            html_parts.append(row)
-
-        html_parts.append('</table>')
-        st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
-
-        # 情绪事件来源展开
-        if sentiment_mode and raw_news:
-            with st.expander(f"情绪事件来源：{sentiment_summary}"):
-                for item in raw_news:
-                    title = item.get("title", "")
-                    url = item.get("url", "")
-                    snippet = item.get("snippet", "")
-                    if url:
-                        link_text = title if title else (snippet[:60] + "…" if snippet else "查看原文")
-                        st.markdown(f"- [{link_text}]({url})")
-                    elif title:
-                        st.markdown(f"- {title}")
-                    if snippet:
-                        st.caption(snippet[:150])
-    else:
-        st.info("本次回测期间无交易记录")
+    # ---- 交易明细 ----
+    _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary)
 
     # ---- 策略横向对比 ----
-    st.markdown("---")
-    st.subheader("策略横向对比")
-    st.caption("同一股票、同一时段、同一初始资金下，各策略使用默认参数的回测表现")
-
-    compare_rows = []
-    for s_name, s_info in STRATEGY_REGISTRY.items():
-        default_params = {pn: prange[2] for pn, prange in s_info["params"].items()}
-        try:
-            s_result = run_backtest(
-                full_data, s_info["class"], default_params,
-                initial_cash=initial_cash, strategy_name=s_name,
-                trade_start=start_dt, trade_end=end_dt,
-                sentiment_events=sentiment_events,
-                position_sizer=sizer_instance,
-            )
-            m = s_result["metrics"]
-        except Exception:
-            continue
-        is_current = (s_name == strategy_name)
-        compare_rows.append({
-            "策略": f"{'★ ' if is_current else ''}{s_name}",
-            "总收益率": m["总收益率"],
-            "年化收益率": m["年化收益率"],
-            "最大回撤": m["最大回撤"],
-            "夏普比率": m["夏普比率"],
-            "胜率": m["胜率"],
-            "交易次数": m["交易次数"],
-            "最终资金": m["最终资金"],
-            "买入持有": m["买入持有"],
-            "_current": is_current,
-            "_return_val": _parse_pct(m["总收益率"]),
-        })
-
-    # ---- 买入持有基准行 ----
-    bh_data = full_data[(full_data.index >= start_dt) & (full_data.index < end_dt)]
-    bh_return = 0.0
-    bh_annual_return = 0.0
-    bh_max_dd = 0.0
-    bh_final_cash = initial_cash
-    if len(bh_data) > 1:
-        first_open = float(bh_data.iloc[0]["open"])
-        last_close = float(bh_data.iloc[-1]["close"])
-        if first_open > 0:
-            bh_return = (last_close - first_open) / first_open * 100
-            days = (bh_data.index[-1] - bh_data.index[0]).days
-            years = max(days / 365.25, 1 / 365.25)
-            bh_annual_return = (((last_close / first_open) ** (1 / years)) - 1) * 100
-            close_prices = bh_data["close"].values
-            peak = float(close_prices[0])
-            bh_max_dd = 0.0
-            for p in close_prices:
-                p_val = float(p)
-                if p_val > peak:
-                    peak = p_val
-                dd = (peak - p_val) / peak * 100
-                if dd > bh_max_dd:
-                    bh_max_dd = dd
-            bh_final_cash = initial_cash * (1 + bh_return / 100)
-
-    compare_rows.append({
-        "策略": "📊 买入持有",
-        "总收益率": f"{bh_return:.2f}%",
-        "年化收益率": f"{bh_annual_return:.2f}%",
-        "最大回撤": f"{bh_max_dd:.2f}%",
-        "夏普比率": "—",
-        "胜率": "—",
-        "交易次数": "0",
-        "最终资金": f"¥{bh_final_cash:,.2f}",
-        "买入持有": f"{bh_return:.2f}%",
-        "_current": False,
-        "_return_val": bh_return,
-    })
-
-    compare_rows.sort(key=lambda r: r["_return_val"], reverse=True)
-    compare_df = pd.DataFrame(compare_rows)
-    display_cols = ["策略", "总收益率", "年化收益率", "最大回撤", "夏普比率", "胜率", "交易次数", "最终资金", "买入持有"]
-    st.dataframe(
-        compare_df[display_cols], use_container_width=True, hide_index=True,
-        column_config={
-            "总收益率": st.column_config.NumberColumn(format="%.2f%%", help="策略回测期间的总盈亏百分比，已扣除交易费用"),
-            "年化收益率": st.column_config.NumberColumn(format="%.2f%%", help="按复利折算的年均收益率"),
-            "最大回撤": st.column_config.NumberColumn(format="%.2f%%", help="期间净值从最高点到最低点的最大跌幅"),
-            "夏普比率": st.column_config.NumberColumn(format="%.2f", help="风险调整后收益，越大越好"),
-            "胜率": st.column_config.NumberColumn(format="%.1f%%", help="盈利交易次数占总交易次数的比例"),
-            "最终资金": st.column_config.NumberColumn(format="¥%.2f"),
-            "买入持有": st.column_config.NumberColumn(format="%.2f%%", help="不进行任何交易，从期初持有到期末的收益率"),
-        }
-    )
-    st.caption("★ 标记为当前选中的策略  |  📊 买入持有 = 不进行任何交易，从期初持有到期末")
-
-    _render_comparison_analysis(compare_df, sentiment_mode, sentiment_events, bh_return, start_dt, end_dt)
+    _render_compare_section(full_data, initial_cash, strategy_name, start_dt, end_dt,
+                            sentiment_events, sizer_instance, sentiment_mode, "股票")

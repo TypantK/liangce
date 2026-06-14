@@ -128,9 +128,18 @@ def _try_baostock(symbol: str, start: str, end: str) -> pd.DataFrame:
                 data_list.append(rs.get_row_data())
 
         if not data_list:
-            raise RuntimeError(f"baostock 返回空数据: {rs.error_msg}")
+            error_msg = rs.error_msg if hasattr(rs, 'error_msg') else "未知错误"
+            raise RuntimeError(f"baostock 返回空数据: {error_msg}")
 
-        df = pd.DataFrame(data_list, columns=rs.fields)
+        # 安全获取列名：rs.fields 可能为空或不存在
+        try:
+            columns = rs.fields if hasattr(rs, 'fields') and rs.fields else None
+        except Exception:
+            columns = None
+        if columns is None:
+            raise RuntimeError("baostock 返回数据缺少列信息(rs.fields 为空)")
+
+        df = pd.DataFrame(data_list, columns=columns)
         df = _normalize_columns(df)
         return df
     finally:
@@ -185,48 +194,22 @@ def _try_akshare_us(symbol: str, start: str, end: str) -> pd.DataFrame:
 
 # ── ccxt (加密货币) ────────────────────────────────────────────────────────
 
-def _try_ccxt_okx(symbol: str, start: str) -> pd.DataFrame:
-    """加密货币 via OKX（国内可直连，无需翻墙）"""
+def _try_ccxt(exchange_id: str, symbol: str, start: str,
+               end: Optional[str] = None, timeout: int = 15000) -> pd.DataFrame:
+    """加密货币 via ccxt 统一入口。exchange_id 如 'okx'/'gate'/'binance'。"""
     import ccxt
 
-    ex = ccxt.okx({'enableRateLimit': True, 'timeout': 15000})
+    ex_cls = getattr(ccxt, exchange_id)
+    ex = ex_cls({'enableRateLimit': True, 'timeout': timeout})
     ohlcv = ex.fetch_ohlcv(symbol, "1d", since=ex.parse8601(start + "T00:00:00Z"), limit=1000)
     if not ohlcv:
-        raise RuntimeError("OKX 返回空数据")
+        raise RuntimeError(f"{exchange_id} 返回空数据")
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('datetime', inplace=True)
     df.drop('timestamp', axis=1, inplace=True)
-    return df
-
-
-def _try_ccxt_gate(symbol: str, start: str) -> pd.DataFrame:
-    """加密货币 via Gate.io（国内可直连，无需翻墙）"""
-    import ccxt
-
-    ex = ccxt.gate({'enableRateLimit': True, 'timeout': 30000})
-    ohlcv = ex.fetch_ohlcv(symbol, "1d", since=ex.parse8601(start + "T00:00:00Z"), limit=1000)
-    if not ohlcv:
-        raise RuntimeError("Gate.io 返回空数据")
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('datetime', inplace=True)
-    df.drop('timestamp', axis=1, inplace=True)
-    return df
-
-
-def _try_ccxt_binance(symbol: str, start: str) -> pd.DataFrame:
-    """加密货币 via Binance（备用，国内需翻墙）"""
-    import ccxt
-
-    ex = ccxt.binance({'enableRateLimit': True, 'timeout': 15000})
-    ohlcv = ex.fetch_ohlcv(symbol, "1d", since=ex.parse8601(start + "T00:00:00Z"), limit=1000)
-    if not ohlcv:
-        raise RuntimeError("Binance 返回空数据")
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('datetime', inplace=True)
-    df.drop('timestamp', axis=1, inplace=True)
+    if end is not None and isinstance(df.index, pd.DatetimeIndex):
+        df = df.loc[:end]
     return df
 
 
@@ -264,9 +247,9 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     elif symbol.endswith('USDT'):
         # ── 加密货币 ──────────────────────────────────────────────────────
         chain = [
-            ("ccxt+Gate.io", lambda: _try_ccxt_gate(symbol, start)),
-            ("ccxt+OKX",     lambda: _try_ccxt_okx(symbol, start)),
-            ("ccxt+Binance", lambda: _try_ccxt_binance(symbol, start)),
+            ("ccxt+Gate.io", lambda: _try_ccxt("gate", symbol, start, end, timeout=30000)),
+            ("ccxt+OKX",     lambda: _try_ccxt("okx", symbol, start, end, timeout=15000)),
+            ("ccxt+Binance", lambda: _try_ccxt("binance", symbol, start, end, timeout=15000)),
         ]
 
     else:

@@ -181,8 +181,8 @@ class SentimentPositionSizer(BaseSizer):
     """仓位叠加层：包装基础 Sizer，根据情绪缩放最终股数。
     
     策略通过 calc_size 获取的下单量 = base_sizer.calc_size() × 情绪乘数。
-    每次 calc_size 调用后记录 _last_base_size / _last_multiplier / _last_label，
-    供 notify_trade 读取后写入交易日志。
+    每次 calc_size 调用后将快照存入 FIFO 字典，由引擎通过 pop_snapshot() 取出，
+    避免快照在连续多笔 calc_size 时被全局覆盖（竞态问题）。
     """
 
     def __init__(self, base_sizer, sentiment_events=None):
@@ -194,11 +194,9 @@ class SentimentPositionSizer(BaseSizer):
         self._current_multiplier = 1.0
         self._current_label = ""
         self._current_desc = ""
-        # 上一次 calc_size 的结果快照（notify_trade 读取后自行重置）
-        self._last_base_size = 0
-        self._last_multiplier = 1.0
-        self._last_label = ""
-        self._last_desc = ""
+        # FIFO 快照字典：key 为自增 id，确保 notify_trade 拿到正确的快照
+        self._snapshot_counter = 0
+        self._snapshots = {}          # {counter: {base_size, multiplier, label, desc}}
 
     def set_sentiment(self, score, tag, news):
         """每根 bar 调用，更新当前情绪状态。"""
@@ -212,9 +210,19 @@ class SentimentPositionSizer(BaseSizer):
         """计算情绪调整后的股数。先调用基础 Sizer，再乘情绪乘数。"""
         base_size = self.base_sizer.calc_size(cash, price, **kwargs)
         adjusted = int(max(0, base_size * self._current_multiplier))
-        # 记录快照供 notify_trade 读取
-        self._last_base_size = int(base_size)
-        self._last_multiplier = self._current_multiplier
-        self._last_label = self._current_label
-        self._last_desc = self._current_desc
+        # 快照存入 FIFO 字典，key 为自增 id
+        self._snapshot_counter += 1
+        self._snapshots[self._snapshot_counter] = {
+            "base_size": int(base_size),
+            "multiplier": self._current_multiplier,
+            "label": self._current_label,
+            "desc": self._current_desc,
+        }
         return adjusted
+
+    def pop_snapshot(self):
+        """取出最早的一笔快照（FIFO）。引擎 notify_trade 中调用。"""
+        if self._snapshots:
+            min_key = min(self._snapshots.keys())
+            return self._snapshots.pop(min_key)
+        return None

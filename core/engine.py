@@ -8,7 +8,7 @@ import backtrader as bt
 import pandas as pd
 import numpy as np
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 from core.sentiment import get_sentiment_for_date, format_sentiment_tag
 
@@ -143,10 +143,27 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             score, headlines = get_sentiment_for_date(
                 self._sentiment_events, dt_str, window_days=3)
             if score == 0.0 and not headlines:
-                # 无日期匹配 → 降级为全局情绪
-                all_scores = [s for _, s, _ in self._sentiment_events]
-                global_score = round(sum(all_scores) / len(all_scores), 2) if all_scores else 0.0
-                all_titles = [t for _, _, t in self._sentiment_events]
+                # 无日期匹配 → 降级为全局情绪（仅使用交易日期及之前的历史事件，避免未来信息泄露）
+                try:
+                    target_dt = datetime.strptime(dt_str[:10], "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    return 0.0, "", []
+
+                past_events = []
+                for date_str, s, t in self._sentiment_events:
+                    try:
+                        event_dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
+                    except (ValueError, TypeError):
+                        continue
+                    if event_dt <= target_dt:
+                        past_events.append((date_str, s, t))
+
+                if not past_events:
+                    return 0.0, "", []
+
+                all_scores = [s for _, s, _ in past_events]
+                global_score = round(sum(all_scores) / len(all_scores), 2)
+                all_titles = [t for _, _, t in past_events]
                 tag = format_sentiment_tag(global_score)
                 return global_score, tag, all_titles[:3]
             tag = format_sentiment_tag(score)
@@ -201,13 +218,15 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
 
                 # 如果是止损/止盈卖出（亏损或盈利超过阈值），推断更精确的原因
                 entry_price = trade.price
-                if sz and entry_price:
+                if sz and entry_price and entry_price > 0 and exit_p and exit_p > 0:
                     pnl_pct = (exit_p - entry_price) / entry_price * 100
                     if pnl_pct < -1.5:
                         exit_reason = TRIGGER_MAP.get(strategy_name, {}).get("sell_sl",
                                         TRIGGER_MAP.get(strategy_name, {}).get("sell_trail", "止损"))
                     elif pnl_pct > 3.5 and strategy_name == "双均线交叉":
                         exit_reason = TRIGGER_MAP[strategy_name]["sell_tp"]
+                else:
+                    pnl_pct = 0.0
 
                 # 情绪极端利空强制平仓：将新闻标题编号写入卖出原因
                 if self._sentiment_force_news:
@@ -215,15 +234,17 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                     exit_reason = f"情绪极端利空强制平仓 {numbered}"
                     self._sentiment_force_news = []
 
-                # 读取仓位叠加层的调整信息
+                # 读取仓位叠加层的调整信息（FIFO 快照，避免竞态）
                 sizer = getattr(self.cerebro, 'position_sizer', None)
                 sent_mult = 1.0
                 sent_label = ""
                 sent_desc = ""
-                if sizer and hasattr(sizer, '_last_multiplier'):
-                    sent_mult = sizer._last_multiplier
-                    sent_label = sizer._last_label
-                    sent_desc = sizer._last_desc
+                if sizer and hasattr(sizer, 'pop_snapshot'):
+                    snap = sizer.pop_snapshot()
+                    if snap:
+                        sent_mult = snap.get("multiplier", 1.0)
+                        sent_label = snap.get("label", "")
+                        sent_desc = snap.get("desc", "")
 
                 self._trade_log.append({
                     'baropen': info['baropen'], 'barclose': trade.barclose,

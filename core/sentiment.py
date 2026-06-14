@@ -38,11 +38,42 @@ _pos_pattern = re.compile("|".join(re.escape(w) for w in _POSITIVE_WORDS))
 _neg_pattern = re.compile("|".join(re.escape(w) for w in _NEGATIVE_WORDS))
 
 
+# 否定词列表：出现在情感词前方语境时反转/衰减分数
+_NEGATION_WORDS = ["不", "无", "避免", "难以", "没有", "不会", "不再", "并未",
+                   "未", "难以", "无法", "难言", "谈不上", "绝非", "并非", "尚无"]
+
+
+def _apply_negation(headline: str, matches: list, is_positive: bool) -> int:
+    """对匹配到的情感词应用否定词扫描。
+    若在情感词前方 8 个字符窗口内出现否定词，则反转贡献：
+      正向词 + 否定 → 算作 -1（假阳性抑制）
+      负向词 + 否定 → 算作 +1（假阴性抑制）
+    否则维持原始计数。
+    """
+    effective = 0
+    # 合并否定词正则
+    _negation_pattern = re.compile("|".join(re.escape(w) for w in _NEGATION_WORDS))
+
+    for m in matches:
+        start = m.start()
+        # 取情感词前 8 个字符窗口
+        prefix = headline[max(0, start - 8):start]
+        if _negation_pattern.search(prefix):
+            # 否定词命中：反转贡献
+            effective += -1 if is_positive else 1
+        else:
+            effective += 1 if is_positive else -1
+    return effective
+
+
 def score_headline(headline: str) -> int:
-    """对单条新闻标题打分：每个利好词 +1，每个利空词 -1。返回整数分数。"""
-    pos_count = len(_pos_pattern.findall(headline))
-    neg_count = len(_neg_pattern.findall(headline))
-    return pos_count - neg_count
+    """对单条新闻标题打分：每个利好词 +1，每个利空词 -1。
+    否定词（不/无/避免/难以/没有/不会等）+情感词组合时反转分数。"""
+    pos_matches = list(_pos_pattern.finditer(headline))
+    neg_matches = list(_neg_pattern.finditer(headline))
+    score = _apply_negation(headline, pos_matches, is_positive=True) + \
+            _apply_negation(headline, neg_matches, is_positive=False)
+    return score
 
 
 def parse_events_from_search(results: list, keyword: str) -> list[tuple[str, int, str]]:
