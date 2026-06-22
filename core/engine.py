@@ -8,6 +8,7 @@ import backtrader as bt
 import pandas as pd
 import numpy as np
 import warnings
+from datetime import datetime
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 from core.sentiment import get_sentiment_for_date, format_sentiment_tag
