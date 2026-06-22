@@ -65,6 +65,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     if theme == "light":
         _bg      = LIGHT_BG
         _grid_c  = LIGHT_GRID_C
+        _grid_h  = 'rgba(229,231,235,0.35)'   # 水平虚线网格：半透明
         _fg      = LIGHT_FG
         _fg_soft = LIGHT_FG_SOFT
         _card_bg = LIGHT_CARD_BG
@@ -76,6 +77,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     else:
         _bg      = BG
         _grid_c  = GRID_C
+        _grid_h  = 'rgba(31,35,53,0.30)'      # 水平虚线网格：暗色半透明
         _fg      = FG
         _fg_soft = FG_SOFT
         _card_bg = CARD_BG
@@ -96,10 +98,13 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     ]
 
     # ---- 构建买卖点 scatter 数据 ----
+    # 买入标记：绿三角 ▲，标在最低价下方 0.5% 处
+    # 卖出标记：红三角 ▼，标在最高价上方 0.5% 处
+    _offset_pct = 0.005
     bp_idx = [dti[idx] for idx, _ in buy_points if idx < n]
-    bp_val = [p for idx, p in buy_points if idx < n]
+    bp_val = [float(df['low'].iloc[idx]) * (1 - _offset_pct) for idx, _ in buy_points if idx < n]
     sp_idx = [dti[idx] for idx, _ in sell_points if idx < n]
-    sp_val = [p for idx, p in sell_points if idx < n]
+    sp_val = [float(df['high'].iloc[idx]) * (1 + _offset_pct) for idx, _ in sell_points if idx < n]
 
     # ---- 构建 hover 浮窗文本 ----
     # 将 trades 按买入/卖出时间建立索引，方便 hover 时匹配到具体盈亏
@@ -224,24 +229,24 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         hovertemplate='MA20: ¥%{y:.2f}<extra></extra>',
     ), row=1, col=1)
 
-    # ---- 买卖信号：竖虚线 + 微型标记（TradingView 事件标注风格）----
-    # 竖线不遮挡蜡烛；微型标记与单根 K 线同宽，悬停浮窗保留
-    for x_date, y_price in zip(bp_idx, bp_val):
-        fig.add_vline(x=x_date, line_dash='dash', line_color=BUY_TRI,
-                       line_width=1.2, opacity=0.65, row=1, col=1)
-    for x_date, y_price in zip(sp_idx, sp_val):
-        fig.add_vline(x=x_date, line_dash='dash', line_color=SELL_TRI,
-                       line_width=1.2, opacity=0.65, row=1, col=1)
+    # ---- 买卖信号：竖虚线 + 三角标记（TradingView 事件标注风格）----
+    # 买入：绿色虚线 ｜ 卖出：红色虚线
+    for x_date in bp_idx:
+        fig.add_vline(x=x_date, line_dash='dash', line_color=DN_RED,
+                       line_width=1.2, opacity=0.50, row=1, col=1)
+    for x_date in sp_idx:
+        fig.add_vline(x=x_date, line_dash='dash', line_color=UP_GREEN,
+                       line_width=1.2, opacity=0.50, row=1, col=1)
 
-    # 买入微型标记（size=8，与单根 K 线同宽）
+    # 买入三角标记：绿 ▲，在 K 线最低价下方
     if bp_idx:
         fig.add_trace(go.Scatter(
             x=bp_idx, y=bp_val, name='买入',
             mode='markers',
             marker=dict(
-                symbol='triangle-down', size=8,
-                color=BUY_TRI,
-                line=dict(color='white', width=1),
+                symbol='triangle-up', size=11,
+                color=DN_RED,
+                line=dict(color='white', width=1.2),
             ),
             text=buy_hover,
             hoverinfo='text',
@@ -251,15 +256,15 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
             ),
         ), row=1, col=1)
 
-    # 卖出微型标记
+    # 卖出三角标记：红 ▼，在 K 线最高价上方
     if sp_idx:
         fig.add_trace(go.Scatter(
             x=sp_idx, y=sp_val, name='卖出',
             mode='markers',
             marker=dict(
-                symbol='triangle-up', size=8,
-                color=SELL_TRI,
-                line=dict(color='white', width=1),
+                symbol='triangle-down', size=11,
+                color=UP_GREEN,
+                line=dict(color='white', width=1.2),
             ),
             text=sell_hover,
             hoverinfo='text',
@@ -313,8 +318,9 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
 
     # X axis — rangeslider 初始范围通过 xaxis.range 设，rangeslider 内部不硬编码 range，
     # 配合 autorange=False 避免拖动后回弹。
+    # 垂直网格线隐藏，保留轴线和刻度
     fig.update_xaxes(
-        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        showgrid=False, zeroline=False,
         linecolor=_line_c, linewidth=1,
         title_font=dict(color=_fg_soft, family=CN_FONT),
         autorange=False,
@@ -330,10 +336,11 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         ),
     )
 
-    # Y axes
+    # Y axes — 水平网格线改为虚线半透明
     fig.update_yaxes(
         title_text='价格 (¥)', row=1, col=1,
-        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        gridcolor=_grid_h, griddash='dash', gridwidth=0.8,
+        showgrid=True, zeroline=False,
         linecolor=_line_c, linewidth=1,
         title_font=dict(color=_fg_soft, size=10, family=CN_FONT),
         tickformat=".2f",
@@ -343,7 +350,8 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     )
     fig.update_yaxes(
         title_text='成交量', row=2, col=1,
-        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        gridcolor=_grid_h, griddash='dash', gridwidth=0.8,
+        showgrid=True, zeroline=False,
         linecolor=_line_c, linewidth=1,
         title_font=dict(color=_fg_soft, size=10, family=CN_FONT),
         fixedrange=False,
@@ -352,7 +360,7 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
     # X axis (shared, bottom)
     fig.update_xaxes(
         row=2, col=1,
-        gridcolor=_grid_c, showgrid=True,
+        showgrid=False,
     )
 
     # ---- 显式缩放：仅在点击 K 线触发缩放时覆盖横轴范围 ----
@@ -381,6 +389,7 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
     if theme == "light":
         _bg      = LIGHT_BG
         _grid_c  = LIGHT_GRID_C
+        _grid_h  = 'rgba(229,231,235,0.35)'   # 水平虚线网格：半透明
         _fg      = LIGHT_FG
         _fg_soft = LIGHT_FG_SOFT
         _card_bg = LIGHT_CARD_BG
@@ -390,6 +399,7 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
     else:
         _bg      = BG
         _grid_c  = GRID_C
+        _grid_h  = 'rgba(31,35,53,0.30)'      # 水平虚线网格：暗色半透明
         _fg      = FG
         _fg_soft = FG_SOFT
         _card_bg = CARD_BG
@@ -402,10 +412,13 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
     ma20 = df["close"].rolling(20).mean()
 
     # ---- 买卖点 scatter ----
+    # 买入标记：绿三角 ▲，净值下方 0.35%
+    # 卖出标记：红三角 ▼，净值上方 0.35%
+    _fund_offset = 0.0035
     bp_idx = [dti[idx] for idx, _ in buy_points if idx < n]
-    bp_val = [float(df["close"].iloc[idx]) for idx, _ in buy_points if idx < n]
+    bp_val = [float(df["close"].iloc[idx]) * (1 - _fund_offset) for idx, _ in buy_points if idx < n]
     sp_idx = [dti[idx] for idx, _ in sell_points if idx < n]
-    sp_val = [float(df["close"].iloc[idx]) for idx, _ in sell_points if idx < n]
+    sp_val = [float(df["close"].iloc[idx]) * (1 + _fund_offset) for idx, _ in sell_points if idx < n]
 
     # ---- hover 浮窗 ----
     trade_by_entry = {}
@@ -506,21 +519,21 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
 
     # 买入/卖出竖虚线
     for x_date in bp_idx:
-        fig.add_vline(x=x_date, line_dash="dash", line_color=BUY_TRI,
-                       line_width=1.2, opacity=0.65)
+        fig.add_vline(x=x_date, line_dash="dash", line_color=DN_RED,
+                       line_width=1.2, opacity=0.50)
     for x_date in sp_idx:
-        fig.add_vline(x=x_date, line_dash="dash", line_color=SELL_TRI,
-                       line_width=1.2, opacity=0.65)
+        fig.add_vline(x=x_date, line_dash="dash", line_color=UP_GREEN,
+                       line_width=1.2, opacity=0.50)
 
-    # 买入标记（朝下三角）
+    # 买入三角标记：绿 ▲，在净值下方
     if bp_idx:
         fig.add_trace(go.Scatter(
             x=bp_idx, y=bp_val, name="买入",
             mode="markers",
             marker=dict(
-                symbol="triangle-down", size=9,
-                color=BUY_TRI,
-                line=dict(color="white", width=1),
+                symbol="triangle-up", size=11,
+                color=DN_RED,
+                line=dict(color="white", width=1.2),
             ),
             text=buy_hover,
             hoverinfo="text",
@@ -530,15 +543,15 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
             ),
         ))
 
-    # 卖出标记（朝上三角）
+    # 卖出三角标记：红 ▼，在净值上方
     if sp_idx:
         fig.add_trace(go.Scatter(
             x=sp_idx, y=sp_val, name="卖出",
             mode="markers",
             marker=dict(
-                symbol="triangle-up", size=9,
-                color=SELL_TRI,
-                line=dict(color="white", width=1),
+                symbol="triangle-down", size=11,
+                color=UP_GREEN,
+                line=dict(color="white", width=1.2),
             ),
             text=sell_hover,
             hoverinfo="text",
@@ -569,8 +582,9 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
         clickmode="event",
     )
 
+    # 垂直网格线隐藏，保留轴线和刻度
     fig.update_xaxes(
-        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        showgrid=False, zeroline=False,
         linecolor=_line_c, linewidth=1,
         autorange=False,
         range=[default_x0, default_x1],
@@ -583,9 +597,11 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
         ),
     )
 
+    # 水平网格线：虚线半透明
     fig.update_yaxes(
         title_text="单位净值 (元)",
-        gridcolor=_grid_c, showgrid=True, zeroline=False,
+        gridcolor=_grid_h, griddash='dash', gridwidth=0.8,
+        showgrid=True, zeroline=False,
         linecolor=_line_c, linewidth=1,
         title_font=dict(color=_fg_soft, size=10, family=CN_FONT),
         tickformat=".4f",

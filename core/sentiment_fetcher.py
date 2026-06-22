@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-新闻搜索获取器 — 用于情绪分析模块
+多通道新闻搜索获取器 — 用于情绪分析模块
 
-尝试多种数据源获取新闻，失败时降级为示例新闻数据。
+架构参照 Agent-Reach：每个平台独立 channel，并行抓取，按序降级。
+当前通道（按优先级）：雪球 → 微博热搜 → DuckDuckGo → Google News RSS → 示例数据
 """
 
 import json
@@ -10,42 +11,196 @@ import urllib.request
 import urllib.parse
 import logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 logger = logging.getLogger(__name__)
 
+# ---- 通用请求工具 ----
+
+_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+_CHANNEL_TIMEOUT = 8  # 单通道超时（秒）
+_FETCH_TIMEOUT = 15   # 整体抓取超时（秒）
+
+
+def _http_get(url: str, headers: dict = None, timeout: int = _CHANNEL_TIMEOUT) -> str:
+    """发起 HTTP GET 请求，返回响应体文本。失败抛异常。"""
+    if headers is None:
+        headers = {"User-Agent": _USER_AGENT}
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+# ===================================================================
+# Channel 1: 雪球 (Xueqiu) — 零配置，财经社区热议帖
+# ===================================================================
+
+_XUEQIU_HOT_URL = "https://xueqiu.com/statuses/hot/listV2.json"
+_XUEQIU_SEARCH_URL = "https://xueqiu.com/stock/search.json"
+_XUEQIU_HOME_URL = "https://xueqiu.com"
+
+
+def _fetch_xueqiu(query: str, max_results: int = 8) -> list[dict]:
+    """
+    从雪球抓取热门帖子和搜索匹配帖。
+
+    先请求首页获取 Cookie，再请求热帖接口和搜索接口。
+    """
+    try:
+        # 第一步：获取 Cookie
+        cookie_req = urllib.request.Request(_XUEQIU_HOME_URL, headers={
+            "User-Agent": _USER_AGENT,
+        })
+        with urllib.request.urlopen(cookie_req, timeout=6) as resp:
+            headers = dict(resp.headers)
+        cookies = headers.get("Set-Cookie", "")
+        # 提取 xq_a_token 等核心 cookie
+        import re as _re
+        token_match = _re.search(r"xq_a_token=([^;]+)", cookies)
+        xq_token = token_match.group(1) if token_match else ""
+
+        results = []
+
+        # 第二步：获取热门帖子
+        hot_headers = {
+            "User-Agent": _USER_AGENT,
+            "Referer": _XUEQIU_HOME_URL,
+        }
+        if xq_token:
+            hot_headers["Cookie"] = f"xq_a_token={xq_token}"
+
+        hot_req = urllib.request.Request(_XUEQIU_HOT_URL, headers=hot_headers)
+        with urllib.request.urlopen(hot_req, timeout=_CHANNEL_TIMEOUT) as resp:
+            hot_data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        hot_items = hot_data.get("items", []) if isinstance(hot_data, dict) else []
+        for item in hot_items[:max_results]:
+            title = (item.get("title") or item.get("text") or item.get("description", "")).strip()
+            if title and len(title) > 2:
+                # 过滤纯 HTML
+                title = _re.sub(r"<[^>]+>", "", title)
+                item_id = item.get("id", "")
+                url = f"https://xueqiu.com{item_id}" if item_id else ""
+                results.append({
+                    "title": title,
+                    "snippet": f"雪球热议 - 回复:{item.get('reply_count', 0)} 转发:{item.get('retweet_count', 0)}",
+                    "url": url,
+                    "source": "xueqiu",
+                })
+
+        # 第三步：关键词搜索
+        if query:
+            search_params = urllib.parse.urlencode({
+                "code": query,
+                "size": str(max_results),
+            })
+            search_url = f"{_XUEQIU_SEARCH_URL}?{search_params}"
+            search_headers = {
+                "User-Agent": _USER_AGENT,
+                "Referer": _XUEQIU_HOME_URL,
+            }
+            if xq_token:
+                search_headers["Cookie"] = f"xq_a_token={xq_token}"
+            search_req = urllib.request.Request(search_url, headers=search_headers)
+            try:
+                with urllib.request.urlopen(search_req, timeout=_CHANNEL_TIMEOUT) as resp:
+                    search_data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                stocks = search_data.get("stocks", []) if isinstance(search_data, dict) else []
+                for stock in stocks[:max_results]:
+                    name = stock.get("name", "")
+                    code = stock.get("code", "")
+                    if name:
+                        results.append({
+                            "title": f"{name}({code}) 雪球股票",
+                            "snippet": f"雪球搜索匹配: {name}",
+                            "url": f"https://xueqiu.com/S/{code}" if code else "",
+                            "source": "xueqiu-search",
+                        })
+            except Exception:
+                pass  # 搜索失败不影响热帖结果
+
+        if results:
+            logger.info(f"雪球抓取成功，共 {len(results)} 条")
+        return results
+
+    except Exception as e:
+        logger.warning(f"雪球抓取失败: {e}")
+        return []
+
+
+# ===================================================================
+# Channel 2: 微博热搜 (Weibo)
+# ===================================================================
+
+def _fetch_weibo_hot() -> list[dict]:
+    """从微博热搜 API 抓取实时热门话题。"""
+    try:
+        req = urllib.request.Request(
+            "https://weibo.com/ajax/side/hotSearch",
+            headers={
+                "User-Agent": _USER_AGENT,
+                "Referer": "https://weibo.com/",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=_CHANNEL_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+        results = []
+        realtime = data.get("data", {}).get("realtime", [])
+        for item in realtime[:25]:
+            word = item.get("word", "")
+            if word:
+                item_url = item.get("word_scheme", "")
+                if not item_url:
+                    item_url = "https://s.weibo.com/weibo?q=" + urllib.parse.quote(word)
+                results.append({
+                    "title": word,
+                    "snippet": f"微博热搜 - 热度: {item.get('raw_hot', 'N/A')}",
+                    "url": item_url,
+                    "source": "weibo",
+                })
+        logger.info(f"微博热搜抓取成功，共 {len(results)} 条")
+        return results
+    except Exception as e:
+        logger.warning(f"微博热搜抓取失败: {e}")
+        return []
+
+
+# ===================================================================
+# Channel 3: DuckDuckGo HTML 搜索
+# ===================================================================
 
 def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     """使用 DuckDuckGo HTML 搜索获取结果。"""
+    import re
     url = "https://html.duckduckgo.com/html/?" + urllib.parse.urlencode({
         "q": query + " 财经 新闻",
     })
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-    })
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+        html = _http_get(url)
     except Exception as e:
         logger.warning(f"DuckDuckGo 搜索请求失败: {e}")
         return []
 
     results = []
-    # 简单解析 HTML 搜索结果
-    import re
-    # 匹配每条结果：链接、标题和摘要
     items = re.findall(
         r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
         html, re.DOTALL | re.IGNORECASE
     )
     if not items:
-        logger.warning(f"DuckDuckGo HTML 解析未匹配到结果项，页面结构可能已变更(query={query})")
-    for url, title, snippet in items[:max_results]:
+        logger.warning(f"DuckDuckGo HTML 解析未匹配到结果项(query={query})")
+    for url_match, title, snippet in items[:max_results]:
         title_clean = re.sub(r'<[^>]+>', '', title).strip()
         snippet_clean = re.sub(r'<[^>]+>', '', snippet).strip()
         if title_clean:
-            results.append({"title": title_clean, "snippet": snippet_clean, "url": url, "source": "web"})
+            results.append({"title": title_clean, "snippet": snippet_clean, "url": url_match, "source": "web"})
     return results
 
+
+# ===================================================================
+# Channel 4: Google News RSS
+# ===================================================================
 
 def _search_google_news_rss(query: str, max_results: int = 8) -> list[dict]:
     """使用 Google News RSS 搜索新闻。"""
@@ -72,14 +227,10 @@ def _search_google_news_rss(query: str, max_results: int = 8) -> list[dict]:
     except Exception:
         pass
 
-    # 降级：urllib + xml.etree.ElementTree 解析 RSS
+    # 降级：手动解析 RSS XML
     try:
         import xml.etree.ElementTree as ET
-        req = urllib.request.Request(rss_url, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-        })
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            xml_data = resp.read().decode("utf-8", errors="replace")
+        xml_data = _http_get(rss_url, timeout=10)
         root = ET.fromstring(xml_data)
         channel = root.find("channel")
         if channel is None:
@@ -101,49 +252,17 @@ def _search_google_news_rss(query: str, max_results: int = 8) -> list[dict]:
         return []
 
 
-def _fetch_weibo_hot() -> list[dict]:
-    """从微博热搜 API 抓取实时热门话题。"""
-    try:
-        req = urllib.request.Request(
-            "https://weibo.com/ajax/side/hotSearch",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                "Referer": "https://weibo.com/",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-
-        results = []
-        realtime = data.get("data", {}).get("realtime", [])
-        for item in realtime[:20]:
-            word = item.get("word", "")
-            if word:
-                item_url = item.get("word_scheme", "")
-                if not item_url:
-                    item_url = "https://s.weibo.com/weibo?q=" + urllib.parse.quote(word)
-                results.append({
-                    "title": word,
-                    "snippet": f"微博热搜 - 热度: {item.get('raw_hot', 'N/A')}",
-                    "url": item_url,
-                    "source": "weibo",
-                })
-        logger.info(f"微博热搜抓取成功，共 {len(results)} 条")
-        return results
-    except Exception as e:
-        logger.warning(f"微博热搜抓取失败: {e}")
-        return []
-
+# ===================================================================
+# Channel 5: 示例数据（最终降级）
+# ===================================================================
 
 def _sample_news(query: str) -> list[dict]:
-    """示例新闻数据（当真实搜索不可用时降级使用）。
+    """示例新闻数据（当所有真实通道不可用时降级使用）。
 
     使用相对于当前日期的动态偏移，分散在 7 天内确保 3 日窗口不会互相污染：
       day-7 ~ day-5: 利好密集，策略正常买入
       day-3 ~ day-2: 利空初现，买入暂停
       day-1 ~ today: 强利空爆发(sentiment < -3)，触发极端利空强制平仓
-
-    URL 使用 Google News RSS 搜索链接，点击可查看相关新闻。
     """
     def _search_url(title: str) -> str:
         return "https://news.google.com/rss/search?q=" + urllib.parse.quote(title) + "&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
@@ -175,26 +294,111 @@ def _sample_news(query: str) -> list[dict]:
     ]
 
 
+# ===================================================================
+# 通道诊断: 检测各通道可用性
+# ===================================================================
+
+def diagnose_channels() -> dict[str, str]:
+    """
+    检测各通道当前状态，返回 {通道名: 状态} 字典。
+    状态值: "ok" / "timeout" / "error:xxx" / "unavailable"
+    参照 agent-reach doctor 命令。
+    """
+    import time
+
+    results = {}
+
+    # 测试雪球 (快速 ping)
+    try:
+        start = time.time()
+        req = urllib.request.Request(_XUEQIU_HOME_URL, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            resp.read()
+        elapsed = (time.time() - start) * 1000
+        results["xueqiu"] = f"ok ({elapsed:.0f}ms)"
+    except Exception as e:
+        results["xueqiu"] = f"error: {e}"
+
+    # 测试微博
+    try:
+        start = time.time()
+        req = urllib.request.Request(
+            "https://weibo.com/ajax/side/hotSearch",
+            headers={"User-Agent": _USER_AGENT, "Referer": "https://weibo.com/"},
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            json.loads(resp.read().decode("utf-8", errors="replace"))
+        elapsed = (time.time() - start) * 1000
+        results["weibo"] = f"ok ({elapsed:.0f}ms)"
+    except Exception as e:
+        results["weibo"] = f"error: {e}"
+
+    # 测试 DuckDuckGo
+    try:
+        start = time.time()
+        _http_get("https://html.duckduckgo.com/html/", timeout=4)
+        elapsed = (time.time() - start) * 1000
+        results["duckduckgo"] = f"ok ({elapsed:.0f}ms)"
+    except Exception as e:
+        results["duckduckgo"] = f"error: {e}"
+
+    # 测试 Google News RSS
+    try:
+        start = time.time()
+        _http_get("https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans", timeout=4)
+        elapsed = (time.time() - start) * 1000
+        results["google_news"] = f"ok ({elapsed:.0f}ms)"
+    except Exception as e:
+        results["google_news"] = f"error: {e}"
+
+    results["sample"] = "ok (always available)"
+
+    return results
+
+
+# ===================================================================
+# 主入口: 并行多通道抓取
+# ===================================================================
+
 def fetch_news(query: str, max_results: int = 6) -> list[dict]:
     """
-    获取与 query 相关的最新财经新闻。
+    并行从多通道抓取与 query 相关的财经新闻。
+
+    通道优先级: 雪球 > 微博热搜 > DuckDuckGo > Google News RSS > 示例数据
+    并行执行前 4 个通道，首个有结果即返回；全部失败则降级到示例数据。
 
     返回: [{"title": "...", "snippet": "...", "url": "...", "source": "..."}, ...]
     """
-    # 尝试 DuckDuckGo
-    results = _search_duckduckgo(query, max_results)
-    if results:
-        return results
+    # 定义通道及其执行函数
+    channels = [
+        ("xueqiu",       lambda: _fetch_xueqiu(query, max_results)),
+        ("weibo",        _fetch_weibo_hot),
+        ("duckduckgo",   lambda: _search_duckduckgo(query, max_results)),
+        ("google_news",  lambda: _search_google_news_rss(query, max_results)),
+    ]
 
-    # 尝试 Google News RSS
-    results = _search_google_news_rss(query, max_results)
-    if results:
-        return results
+    # 并行执行所有通道
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_map = {
+            executor.submit(fn): name
+            for name, fn in channels
+        }
 
-    # 尝试微博热搜
-    results = _fetch_weibo_hot()
-    if results:
-        return results[:max_results]
+        # 收集结果：通道级超时约束
+        for future in as_completed(future_map, timeout=_FETCH_TIMEOUT):
+            name = future_map[future]
+            try:
+                results = future.result(timeout=_CHANNEL_TIMEOUT)
+                if results:
+                    logger.info(f"多通道抓取: {name} 返回 {len(results)} 条结果")
+                    return results[:max_results]
+                else:
+                    logger.info(f"多通道抓取: {name} 无结果")
+            except TimeoutError:
+                logger.warning(f"多通道抓取: {name} 超时")
+            except Exception as e:
+                logger.warning(f"多通道抓取: {name} 失败: {e}")
 
-    # 降级：使用示例数据
-    return _sample_news(query)
+    # 全部失败 → 降级到示例数据
+    logger.warning("所有通道均失败，降级到示例数据")
+    return _sample_news(query)[:max_results]
