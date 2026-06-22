@@ -135,6 +135,8 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             self._sentiment_events = sentiment_events or []
             self._sentiment_force_news = []  # 极空利空强制平仓时的新闻标题
             self._last_sentiment_score = 0.0
+            self._sentiment_blocked = False  # 标记当前 bar 被情绪拦截
+            self._blocked_buy_log = []  # 记录被拦截的买入尝试
 
         def _check_sentiment(self, dt_str):
             """返回 (分数, 标签, 新闻列表)。
@@ -188,9 +190,10 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
             if self._sentiment_events:
                 sent_score, sent_tag, sent_news = self._check_sentiment(dt_str)
                 self._last_sentiment_score = sent_score
-                # 利空情绪 → 暂停买入（不执行 super().next()，策略不会下单）
-                if sent_score < 0:
-                    return
+                # 记录情绪状态，供 buy() 拦截使用
+                self._sentiment_blocked = (sent_score < 0)
+                # 标记当前日期字符串，供 buy() 拦截日志使用
+                self._current_dt_str = dt_str
                 # 极端利空 → 强制平仓，记录触发新闻供 notify_trade 使用
                 if sent_score < -3 and self.position:
                     self._sentiment_force_news = list(sent_news[:3])
@@ -198,6 +201,44 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                     return
 
             super().next()
+
+            # 将被情绪拦截的买入尝试追加到 trade_log
+            for blocked in self._blocked_buy_log:
+                self._trade_log.append({
+                    'baropen': 0, 'barclose': 0,
+                    'entry': blocked['price'], 'exit': blocked['price'], 'pnl': 0,
+                    'size': 0,
+                    'entry_reason': f"情绪拦截：{blocked['reason']}",
+                    'exit_reason': '情绪拦截未买入',
+                    'entry_news': '', 'exit_news': '',
+                    'sentiment_score': blocked['sentiment_score'],
+                    'sentiment_multiplier': 0.0,
+                    'sentiment_label': '情绪拦截',
+                    'sentiment_desc': f"情绪{blocked['sentiment_score']:+.1f}分，暂停入场",
+                    '_blocked_date': blocked.get('date', ''),
+                })
+            self._blocked_buy_log.clear()
+
+        def buy(self, *args, **kwargs):
+            """拦截买入：情绪利空时记录被拦截交易但不实际下单"""
+            if self._sentiment_events and self._sentiment_blocked:
+                dt_str = getattr(self, '_current_dt_str', '')
+                sent_score = self._last_sentiment_score
+                # 获取当前价格
+                try:
+                    price = self.data.close[0]
+                except Exception:
+                    price = 0.0
+                # 读取原始策略信号（持仓状态等）
+                buy_reason = TRIGGER_MAP.get(self._strategy_name, {}).get("buy", "策略买入信号")
+                self._blocked_buy_log.append({
+                    'date': dt_str,
+                    'price': round(price, 3),
+                    'reason': buy_reason,
+                    'sentiment_score': sent_score,
+                })
+                return None  # 不下单
+            return super().buy(*args, **kwargs)
 
         def notify_trade(self, trade):
             if not trade.isclosed:
@@ -356,14 +397,17 @@ def run_backtest(data, strategy_class, strategy_params,
     for tl in trade_log:
         bi = min(tl['baropen'], max_idx)
         si = min(tl['barclose'], max_idx)
-        buy_pts.append((bi, tl['entry']))
-        sell_pts.append((si, tl['exit']))
+        # 情绪拦截的交易（pnl=0, size=0, baropen=0）不绘制买卖点
+        is_blocked = (tl['pnl'] == 0 and tl['size'] == 0 and tl['baropen'] == 0)
+        if not is_blocked:
+            buy_pts.append((bi, tl['entry']))
+            sell_pts.append((si, tl['exit']))
         trades.append({
-            "买入时间": data.index[bi].strftime('%Y-%m-%d %H:%M'),
+            "买入时间": data.index[bi].strftime('%Y-%m-%d %H:%M') if not is_blocked else tl.get('_blocked_date', ''),
             "买入价": round(tl['entry'], 2),
             "买入数量": tl['size'],
             "买入原因": tl.get('entry_reason', ''),
-            "卖出时间": data.index[si].strftime('%Y-%m-%d %H:%M'),
+            "卖出时间": data.index[si].strftime('%Y-%m-%d %H:%M') if not is_blocked else '-',
             "卖出价": round(tl['exit'], 2),
             "卖出原因": tl.get('exit_reason', ''),
             "盈亏": f"{tl['pnl']:+.2f}",

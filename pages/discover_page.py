@@ -201,10 +201,161 @@ def _render_card(result, theme):
 
 
 # ============================================================
+#  扫描状态机
+# ============================================================
+
+SCAN_KEYS = [
+    '_ds_running',       # bool: 是否正在扫描
+    '_ds_results',       # list: 已收集的扫描结果
+    '_ds_failed',        # list: 数据获取失败的标的名
+    '_ds_pool',          # list: 扫描标的快照 [(name, code, cat), ...]
+    '_ds_strategies',    # list: 策略名快照
+    '_ds_cursor',        # int: 当前处理的标的索引
+    '_ds_total',         # int: 总标的数
+    '_ds_scan_id',       # str: 本次扫描唯一 ID（用于区分新旧扫描）
+    '_ds_type_filter',   # list: 快照时的类型筛选
+    '_ds_signal_filter', # str: 快照时的信号方向筛选
+]
+
+
+def _init_scan_state():
+    """初始化扫描相关的 session_state 键"""
+    for key in SCAN_KEYS:
+        if key not in st.session_state:
+            st.session_state[key] = None
+    if st.session_state._ds_running is None:
+        st.session_state._ds_running = False
+    if st.session_state._ds_results is None:
+        st.session_state._ds_results = []
+    if st.session_state._ds_failed is None:
+        st.session_state._ds_failed = []
+    if st.session_state._ds_cursor is None:
+        st.session_state._ds_cursor = 0
+
+
+def _start_scan(pool_items, strategies, selected_types, selected_signal):
+    """启动一次新扫描"""
+    import uuid
+    st.session_state._ds_running = True
+    st.session_state._ds_results = []
+    st.session_state._ds_failed = []
+    st.session_state._ds_pool = pool_items
+    st.session_state._ds_strategies = strategies
+    st.session_state._ds_cursor = 0
+    st.session_state._ds_total = len(pool_items)
+    st.session_state._ds_scan_id = uuid.uuid4().hex[:8]
+    st.session_state._ds_type_filter = selected_types
+    st.session_state._ds_signal_filter = selected_signal
+
+
+def _continue_scan():
+    """处理一批（1 个标的 × 全部策略），然后 rerun"""
+    cursor = st.session_state._ds_cursor
+    pool = st.session_state._ds_pool
+    strategies = st.session_state._ds_strategies
+    total = st.session_state._ds_total
+
+    if cursor >= total:
+        st.session_state._ds_running = False
+        return
+
+    sym_name, sym_code, sym_cat = pool[cursor]
+
+    # 检查数据是否可用
+    has_data = _fetch_data_cached(sym_code)
+    if has_data is None:
+        st.session_state._ds_failed.append(sym_name)
+    else:
+        for strat_name in strategies:
+            res = _scan_symbol_strategy(sym_name, sym_code, strat_name)
+            if res is not None:
+                st.session_state._ds_results.append(res)
+
+    st.session_state._ds_cursor = cursor + 1
+
+    if st.session_state._ds_cursor < total:
+        # 还没扫完，展示进度后 rerun 继续下一批
+        done = st.session_state._ds_cursor
+        next_name = pool[done][0] if done < total else ""
+        st.progress(done / total,
+            text=f"扫描中... {done}/{total} 个标的，下一个: {next_name}")
+        import time; time.sleep(0.05)
+        st.rerun()
+    else:
+        st.session_state._ds_running = False
+
+
+def _show_results(theme):
+    """展示上次扫描的完整结果"""
+    all_results = st.session_state._ds_results
+    failed_symbols = st.session_state._ds_failed
+    signal_filter = st.session_state._ds_signal_filter
+
+    if signal_filter == "仅买入":
+        signals_of_interest = ["买入信号", "持有中"]
+    elif signal_filter == "仅卖出":
+        signals_of_interest = ["卖出信号"]
+    else:
+        signals_of_interest = ["买入信号", "卖出信号", "持有中"]
+
+    filtered = [r for r in all_results if r['signal'] in signals_of_interest]
+
+    st.markdown("---")
+    st.subheader(f"扫描结果（共 {len(filtered)} 条信号）")
+
+    if not filtered:
+        st.info("今日暂无符合条件的信号")
+        if failed_symbols:
+            st.caption(f"数据获取失败: {', '.join(failed_symbols)}")
+        return
+
+    buy_signals = [r for r in filtered if r['signal'] == '买入信号']
+    sell_signals = [r for r in filtered if r['signal'] == '卖出信号']
+    hold_signals = [r for r in filtered if r['signal'] == '持有中']
+    fail_signals = [r for r in all_results if r['signal'] == '扫描失败']
+
+    if buy_signals:
+        st.markdown("### 📈 买入机会")
+        st.caption(f"共 {len(buy_signals)} 条")
+        cols = st.columns(2)
+        for idx, r in enumerate(buy_signals):
+            with cols[idx % 2]:
+                st.markdown(_render_card(r, theme), unsafe_allow_html=True)
+
+    if sell_signals:
+        st.markdown("### 📉 卖出信号")
+        st.caption(f"共 {len(sell_signals)} 条")
+        cols = st.columns(2)
+        for idx, r in enumerate(sell_signals):
+            with cols[idx % 2]:
+                st.markdown(_render_card(r, theme), unsafe_allow_html=True)
+
+    if hold_signals:
+        st.markdown("### 📊 当前持有")
+        st.caption(f"共 {len(hold_signals)} 条")
+        cols = st.columns(2)
+        for idx, r in enumerate(hold_signals):
+            with cols[idx % 2]:
+                st.markdown(_render_card(r, theme), unsafe_allow_html=True)
+
+    if fail_signals:
+        with st.expander(f"扫描失败（共 {len(fail_signals)} 条）"):
+            fail_df = pd.DataFrame([
+                {"标的": r['symbol'], "策略": r['strategy'], "错误": r['signal_desc']}
+                for r in fail_signals
+            ])
+            st.dataframe(fail_df, use_container_width=True, hide_index=True)
+
+    if failed_symbols:
+        st.caption(f"数据获取失败: {', '.join(failed_symbols)}")
+
+
+# ============================================================
 #  render()
 # ============================================================
 def render():
     theme = st.session_state.get("_theme_mode", "dark")
+    _init_scan_state()
 
     # ========== 标题 ==========
     st.title("发现")
@@ -218,20 +369,53 @@ def render():
         type_options = ["全部", "A股", "美股", "加密货币"]
         selected_types = st.multiselect(
             "标的类型", type_options, default=["全部"],
-            help="筛选要扫描的标的类型"
+            help="筛选要扫描的标的类型",
+            disabled=st.session_state._ds_running
         )
     with col2:
         signal_options = ["全部", "仅买入", "仅卖出"]
         selected_signal = st.selectbox(
             "信号方向", signal_options, index=0,
-            help="按信号方向过滤结果"
+            help="按信号方向过滤结果",
+            disabled=st.session_state._ds_running
         )
     with col3:
         st.markdown("<br>", unsafe_allow_html=True)
-        scan_btn = st.button("开始扫描", type="primary", use_container_width=True)
+        scan_btn = st.button(
+            "扫描中..." if st.session_state._ds_running else "开始扫描",
+            type="primary",
+            use_container_width=True,
+            disabled=st.session_state._ds_running
+        )
 
-    # ========== 扫描逻辑 ==========
-    if not scan_btn:
+    # ========== 扫描状态机路由 ==========
+
+    # 情况 1：正在扫描中 → 继续处理
+    if st.session_state._ds_running:
+        _continue_scan()
+        # _continue_scan 内部会 rerun，只有完成时才走到这里
+        st.rerun()  # 完成后刷新一次，进入结果展示
+
+    # 情况 2：用户点击扫描按钮
+    if scan_btn:
+        pool_items = []
+        for name, code in STOCK_POOL.items():
+            cat = _classify_symbol(code)
+            if "全部" in selected_types or cat in selected_types:
+                pool_items.append((name, code, cat))
+
+        if not pool_items:
+            st.warning("没有符合条件的标的")
+            return
+
+        strategies = list(STRATEGY_REGISTRY.keys())
+        _start_scan(pool_items, strategies, selected_types, selected_signal)
+        st.rerun()
+
+    # 情况 3：空闲状态 — 有历史结果则展示，否则提示
+    if st.session_state._ds_results:
+        _show_results(theme)
+    else:
         if theme == "light":
             st.markdown("""
             <style>
@@ -247,109 +431,3 @@ def render():
             </style>
             """, unsafe_allow_html=True)
         st.info("点击「开始扫描」运行全部策略")
-        return
-
-    # 确定要扫描的标的
-    pool_items = []
-    for name, code in STOCK_POOL.items():
-        cat = _classify_symbol(code)
-        if "全部" in selected_types or cat in selected_types:
-            pool_items.append((name, code, cat))
-
-    if not pool_items:
-        st.warning("没有符合条件的标的")
-        return
-
-    strategies = list(STRATEGY_REGISTRY.keys())
-
-    # ========== 进度条 ==========
-    total_tasks = len(pool_items) * len(strategies)
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    all_results = []
-    failed_symbols = []
-
-    for i, (sym_name, sym_code, sym_cat) in enumerate(pool_items):
-        has_data = _fetch_data_cached(sym_code)
-        if has_data is None:
-            failed_symbols.append(sym_name)
-            progress_bar.progress((i * len(strategies) + len(strategies)) / total_tasks)
-            continue
-
-        for j, strat_name in enumerate(strategies):
-            task_idx = i * len(strategies) + j + 1
-            status_text.text(f"扫描中... {sym_name} × {strat_name} ({task_idx}/{total_tasks})")
-            progress_bar.progress(task_idx / total_tasks)
-
-            res = _scan_symbol_strategy(sym_name, sym_code, strat_name)
-            if res is not None:
-                all_results.append(res)
-
-    progress_bar.empty()
-    status_text.empty()
-
-    # ========== 过滤信号 ==========
-    if selected_signal == "仅买入":
-        signals_of_interest = ["买入信号", "持有中"]
-    elif selected_signal == "仅卖出":
-        signals_of_interest = ["卖出信号"]
-    else:
-        signals_of_interest = ["买入信号", "卖出信号", "持有中"]
-
-    filtered = [r for r in all_results if r['signal'] in signals_of_interest]
-
-    # ========== 结果展示 ==========
-    st.markdown("---")
-    st.subheader(f"扫描结果（共 {len(filtered)} 条信号）")
-
-    if not filtered:
-        st.info("今日暂无符合条件的信号")
-        if failed_symbols:
-            st.caption(f"数据获取失败: {', '.join(failed_symbols)}")
-        return
-
-    # 分组
-    buy_signals = [r for r in filtered if r['signal'] == '买入信号']
-    sell_signals = [r for r in filtered if r['signal'] == '卖出信号']
-    hold_signals = [r for r in filtered if r['signal'] == '持有中']
-    fail_signals = [r for r in all_results if r['signal'] == '扫描失败']
-
-    # 买入信号区
-    if buy_signals:
-        st.markdown("### 📈 买入机会")
-        st.caption(f"共 {len(buy_signals)} 条")
-        cols = st.columns(2)
-        for idx, r in enumerate(buy_signals):
-            with cols[idx % 2]:
-                st.markdown(_render_card(r, theme), unsafe_allow_html=True)
-
-    # 卖出信号区
-    if sell_signals:
-        st.markdown("### 📉 卖出信号")
-        st.caption(f"共 {len(sell_signals)} 条")
-        cols = st.columns(2)
-        for idx, r in enumerate(sell_signals):
-            with cols[idx % 2]:
-                st.markdown(_render_card(r, theme), unsafe_allow_html=True)
-
-    # 持有中
-    if hold_signals:
-        st.markdown("### 📊 当前持有")
-        st.caption(f"共 {len(hold_signals)} 条")
-        cols = st.columns(2)
-        for idx, r in enumerate(hold_signals):
-            with cols[idx % 2]:
-                st.markdown(_render_card(r, theme), unsafe_allow_html=True)
-
-    # 扫描失败
-    if fail_signals:
-        with st.expander(f"扫描失败（共 {len(fail_signals)} 条）"):
-            fail_df = pd.DataFrame([
-                {"标的": r['symbol'], "策略": r['strategy'], "错误": r['signal_desc']}
-                for r in fail_signals
-            ])
-            st.dataframe(fail_df, use_container_width=True, hide_index=True)
-
-    if failed_symbols:
-        st.caption(f"数据获取失败: {', '.join(failed_symbols)}")

@@ -15,6 +15,31 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 logger = logging.getLogger(__name__)
 
+# ---- 相关性过滤 ----
+_FINANCE_KEYWORDS = [
+    "股", "基金", "涨", "跌", "市", "盘", "指", "板", "块",
+    "利", "资", "金", "财", "经", "投", "融", "券", "商",
+    "银", "债", "汇", "率", "税", "红", "息", "盈", "亏",
+    "牛", "熊", "监", "管", "策", "改", "裁", "并", "购",
+    "业", "绩", "报", "发", "公", "告", "披", "露", "创",
+    "IPO", "ETF", "QDII", "LOF", "A股", "港股", "美股",
+    "加息", "降息", "通胀", "CPI", "PPI", "GDP",
+]
+
+
+def _is_finance_relevant(title: str, snippet: str = "", query: str = "") -> bool:
+    """检查新闻是否与财经/投资/标的物相关。"""
+    text = f"{title} {snippet}"
+    # 1. 匹配 query 关键词（至少 2 字才匹配）
+    if query and len(query) >= 2:
+        if query.lower() in text.lower():
+            return True
+    # 2. 匹配财经关键词
+    for kw in _FINANCE_KEYWORDS:
+        if kw in text:
+            return True
+    return False
+
 # ---- 通用请求工具 ----
 
 _USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -401,4 +426,9 @@ def fetch_news(query: str, max_results: int = 6) -> list[dict]:
 
     # 全部失败 → 降级到示例数据
     logger.warning("所有通道均失败，降级到示例数据")
-    return _sample_news(query)[:max_results]
+    results = _sample_news(query)
+    # 相关性过滤：只保留财经相关的新闻
+    if query:
+        results = [r for r in results if _is_finance_relevant(
+            r.get("title", ""), r.get("snippet", ""), query)]
+    return results[:max_results]
