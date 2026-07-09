@@ -203,6 +203,114 @@ def _try_akshare_cn(symbol: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
+def _try_eastmoney_board_kline(board_code: str, start: str, end: str) -> pd.DataFrame:
+    """直连东方财富板块历史 K 线接口（带完整 UA，规避无 UA 被拒）。
+
+    东方财富行业板块的行情市场号为 90，secid 形如 "90.BK1036"。
+    返回归一化后的 OHLCV DataFrame。
+    """
+    import requests
+
+    secid = f"90.{board_code}"
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    params = {
+        "secid": secid,
+        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": "101",            # 日 K
+        "fqt": "0",              # 不复权（板块指数本身无复权概念）
+        "beg": start.replace("-", ""),
+        "end": end.replace("-", ""),
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://quote.eastmoney.com/",
+        "Accept": "*/*",
+    }
+    resp = requests.get(url, params=params, headers=headers, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    klines = data.get("data", {}).get("klines", [])
+    if not klines:
+        raise RuntimeError(f"东方财富板块 {board_code} 返回空 K 线")
+    rows = []
+    for line in klines:
+        # 格式: 日期,开盘,收盘,最高,最低,成交量,成交额,...
+        parts = line.split(",")
+        rows.append({
+            "日期": parts[0],
+            "开盘": float(parts[1]),
+            "收盘": float(parts[2]),
+            "最高": float(parts[3]),
+            "最低": float(parts[4]),
+            "成交量": float(parts[5]),
+        })
+    df = pd.DataFrame(rows)
+    return _normalize_columns(df)
+
+
+def _try_akshare_sector(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """申万行业板块指数（真实板块数据）。
+
+    优先级：直连东方财富板块 K 线（带 UA，最稳）→ akshare 行业板块接口兜底。
+    symbol 形如 "半导体" / "半导体#BK1036"：
+      - 仅行业名时自动查询行业列表匹配代码；
+      - 带 #代码 时直接指定东方财富行业板块代码（更稳）。
+    """
+    import akshare as ak
+    import time
+
+    # 拆分行业名与板块代码
+    board_name = symbol
+    board_code = None
+    if '#' in symbol:
+        board_name, board_code = symbol.split('#', 1)
+
+    # 若仅有行业名，先通过 akshare 行业列表解析出板块代码
+    if not board_code:
+        try:
+            industry_df = ak.stock_board_industry_name_em()
+            name_col = code_col = None
+            for col in industry_df.columns:
+                cl = col.strip()
+                if cl in ('行业', '板块名称', '名称', 'name'):
+                    name_col = col
+                elif cl in ('板块代码', '代码', 'code'):
+                    code_col = col
+            matched = industry_df[industry_df[name_col].astype(str).str.contains(board_name, na=False)]
+            if not matched.empty:
+                board_code = str(matched.iloc[0][code_col])
+        except Exception:
+            pass
+    if not board_code:
+        raise RuntimeError(f"无法解析行业板块代码: {board_name}")
+
+    last_err = None
+    # 主路径：直连东方财富（带 UA），重试 3 次
+    for attempt in range(3):
+        try:
+            df = _try_eastmoney_board_kline(board_code, start, end)
+            if df is not None and not df.empty:
+                return df
+        except Exception as e:
+            last_err = e
+            time.sleep(1)
+
+    # 兜底：akshare 行业板块接口
+    try:
+        df = ak.stock_board_industry_hist_em(symbol=board_code, period="日k", adjust="")
+        if df is not None and not df.empty:
+            return _normalize_columns(df)
+    except Exception as e:
+        last_err = e
+
+    raise RuntimeError(f"行业板块获取失败: {last_err}")
+
+
+
+
 def _try_akshare_us(symbol: str, start: str, end: str) -> pd.DataFrame:
     """美股 via akshare（走东方财富美股频道，国内无需翻墙）"""
     import akshare as ak
@@ -263,6 +371,7 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     A 股 (.SZ/.SH)：open-stock-data → baostock 直连 → akshare
     加密货币 (USDT)：ccxt+OKX → ccxt+Binance
     美股 (其他)：    open-stock-data → akshare 美股接口
+    板块指数 (SECTOR:xxx)：akshare 申万行业板块指数
 
     国内网络无需翻墙即可获取 A 股和美股数据。
     相同标的+区间会自动缓存到本地（默认 1 天），第二次起秒级返回，避免重复联网。
@@ -291,6 +400,7 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
         ]
 
     elif symbol.endswith(('.SZ', '.SH')):
+        # ── A 股 ──────────────────────────────────────────────────────────
         market = "sh" if symbol.endswith('.SH') else "sz"
         raw = symbol.replace('.SZ', '').replace('.SH', '')
         chain = [

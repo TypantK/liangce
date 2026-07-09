@@ -20,22 +20,32 @@ from utils.chart import (UP_GREEN, DN_RED, CN_FONT)
 # ============================================================
 #  板块/标的选项
 # ============================================================
+# 板块类使用 SECTOR: 前缀（走申万行业板块指数接口）
+# 格式：SECTOR:行业名#板块代码  → 带 #代码 可精准匹配东方财富行业板块
+# 个股类直接使用 A股/美股/加密货币代码
 SECTOR_OPTIONS = {
-    "AI 半导体": "600519.SH",       # 占位示例
-    "新能源": "002594.SZ",          # 比亚迪
-    "白酒": "000858.SZ",            # 五粮液
-    "银行": "000001.SZ",            # 平安银行
-    "保险": "601318.SH",            # 中国平安
-    "电池": "300750.SZ",            # 宁德时代
-    "比亚迪": "002594.SZ",
-    "贵州茅台": "600519.SH",
-    "平安银行": "000001.SZ",
-    "万科A": "000002.SZ",
-    "招商银行": "600036.SH",
-    "特斯拉": "TSLA",
-    "苹果": "AAPL",
-    "BTC/USDT": "BTC/USDT",
-    "ETH/USDT": "ETH/USDT",
+    # ── 真实申万行业板块指数 ──
+    "AI 半导体": "SECTOR:半导体#BK1036",
+    "半导体":     "SECTOR:半导体#BK1036",
+    "新能源":     "SECTOR:电源设备#BK1034",
+    "白酒":       "SECTOR:白酒#BK0478",
+    "银行":       "SECTOR:银行#BK0475",
+    "保险":       "SECTOR:保险#BK0474",
+    "电池":       "SECTOR:电池#BK1033",
+    "汽车零部件": "SECTOR:汽车零部件#BK0481",
+    "软件开发":   "SECTOR:软件开发#BK0737",
+    "消费电子":   "SECTOR:消费电子#BK1037",
+    # ── 个股（保持原样，便于个股级预测）──
+    "比亚迪":     "002594.SZ",
+    "贵州茅台":   "600519.SH",
+    "平安银行":   "000001.SZ",
+    "万科A":      "000002.SZ",
+    "招商银行":   "600036.SH",
+    "中国平安":   "601318.SH",
+    "特斯拉":     "TSLA",
+    "苹果":       "AAPL",
+    "BTC/USDT":   "BTC/USDT",
+    "ETH/USDT":   "ETH/USDT",
 }
 
 
@@ -497,7 +507,7 @@ def render():
     with col1:
         sector_name = st.selectbox(
             '选择板块/标的', list(SECTOR_OPTIONS.keys()),
-            help='选择要预测走势的板块或个股（后续可接入真实板块指数）',
+            help='板块类走申万行业指数，个股类走对应行情接口',
         )
     with col2:
         predict_days = st.selectbox('预测天数', [30, 45, 60, 90], index=2)
@@ -511,6 +521,8 @@ def render():
 
     # ========== 数据获取 ==========
     symbol = SECTOR_OPTIONS[sector_name]
+    is_sector = symbol.startswith('SECTOR:')
+    price_unit = '点' if is_sector else '¥'
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
 
@@ -534,12 +546,13 @@ def render():
     last_date = df.index[-1]
 
     st.markdown('---')
-    st.markdown(f"### 预测起点 · {last_date.strftime('%Y-%m-%d')} 收盘 ¥{last_price:.2f}")
+    st.markdown(f"### 预测起点 · {last_date.strftime('%Y-%m-%d')} 收盘 {price_unit}{last_price:.2f}")
 
     # 图例说明
-    st.markdown("""
+    hist_label = '历史板块指数' if is_sector else '历史行情'
+    st.markdown(f"""
     **图例说明：**
-    - <span style='color:#e7505a'>红色实心蜡烛</span> = 历史行情（已发生）
+    - <span style='color:#e7505a'>红色实心蜡烛</span> = {hist_label}（已发生）
     - <span style='color:#4da6ff'>蓝色半透明蜡烛</span> = 基准预测（回调后情景）
     - <span style='color:#f5a623'>金色虚线</span> = 直接突破路径
     - <span style='color:#e7505a'>红色虚线</span> = 趋势转弱路径
@@ -598,19 +611,19 @@ def render():
 
     # 基准分析
     base_analysis = f"""
-    **基准预估（回调后）：** 当前价格 ¥{price:.2f} 处于 MA20(¥{ma20:.2f}) / MA60(¥{ma60:.2f}) 附近。
+    **基准预估（回调后）：** 当前价格 {price_unit}{price:.2f} 处于 MA20({price_unit}{ma20:.2f}) / MA60({price_unit}{ma60:.2f}) 附近。
     """
     if price > ma20 > ma60:
         base_analysis += f"""
-    多头排列完好，若后续回踩 MA20（约 ¥{ma20:.2f}）且缩量不破，则消化短期获利盘后有望再起新一轮上行。
+    多头排列完好，若后续回踩 MA20（约 {price_unit}{ma20:.2f}）且缩量不破，则消化短期获利盘后有望再起新一轮上行。
     """
     elif ma20 > price > ma60:
         base_analysis += f"""
-    价格已回落至 MA20 与 MA60 之间，短期技术性回调概率较高。若 MA60（约 ¥{ma60:.2f}）支撑有效，则有望企稳反弹。
+    价格已回落至 MA20 与 MA60 之间，短期技术性回调概率较高。若 MA60（约 {price_unit}{ma60:.2f}）支撑有效，则有望企稳反弹。
     """
     elif price < ma60:
         base_analysis += f"""
-    价格已跌破 MA60（约 ¥{ma60:.2f}），短期趋势偏弱。需关注能否快速收复，否则可能进一步下探。
+    价格已跌破 MA60（约 {price_unit}{ma60:.2f}），短期趋势偏弱。需关注能否快速收复，否则可能进一步下探。
     """
     else:
         base_analysis += f"""
@@ -635,11 +648,11 @@ def render():
     st.markdown('### 关键价位参考')
 
     key_levels = []
-    key_levels.append({'类型': 'MA20 支撑', '价位': f'¥{ma20:.2f}', '意义': '短期回调第一支撑'})
-    key_levels.append({'类型': 'MA60 支撑', '价位': f'¥{ma60:.2f}', '意义': '中期趋势分界线'})
-    key_levels.append({'类型': '当前收盘', '价位': f'¥{price:.2f}', '意义': '预测起点'})
-    key_levels.append({'类型': '预测高点（突破）', '价位': f'¥{bull_ohlc["close"].iloc[-1]:.2f}', '意义': f'{predict_days}日后直接突破情景'})
-    key_levels.append({'类型': '预测低点（转弱）', '价位': f'¥{bear_ohlc["close"].iloc[-1]:.2f}', '意义': f'{predict_days}日后趋势转弱情景'})
+    key_levels.append({'类型': 'MA20 支撑', '价位': f'{price_unit}{ma20:.2f}', '意义': '短期回调第一支撑'})
+    key_levels.append({'类型': 'MA60 支撑', '价位': f'{price_unit}{ma60:.2f}', '意义': '中期趋势分界线'})
+    key_levels.append({'类型': '当前收盘', '价位': f'{price_unit}{price:.2f}', '意义': '预测起点'})
+    key_levels.append({'类型': '预测高点（突破）', '价位': f'{price_unit}{bull_ohlc["close"].iloc[-1]:.2f}', '意义': f'{predict_days}日后直接突破情景'})
+    key_levels.append({'类型': '预测低点（转弱）', '价位': f'{price_unit}{bear_ohlc["close"].iloc[-1]:.2f}', '意义': f'{predict_days}日后趋势转弱情景'})
 
     key_df = pd.DataFrame(key_levels)
     if theme == 'dark':

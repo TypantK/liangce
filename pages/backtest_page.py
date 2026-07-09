@@ -371,35 +371,54 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 <!-- cv:{version} -->
 <script>
 (function() {{
-    document.addEventListener('keydown', function(e) {{
+    function handleHotkey(e) {{
+        // 只处理单字符且非组合键，避免与浏览器/系统快捷键冲突
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
         var tag = (document.activeElement || {{}}).tagName || '';
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
         var gd = window.__chartDebug && window.__chartDebug.getGd();
         if (!gd) return;
-        var key = e.key.toLowerCase();
+        var key = (e.key || '').toLowerCase();
+        var handled = true;
         if (key === 'q') {{
-            e.preventDefault();
             Plotly.relayout(gd, {{dragmode: 'zoom'}});
         }} else if (key === 'w') {{
-            e.preventDefault();
             Plotly.relayout(gd, {{dragmode: 'pan'}});
         }} else if (key === 'e') {{
-            e.preventDefault();
             Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
             setTimeout(function() {{
                 var zoomOutBtn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
                 if (zoomOutBtn) zoomOutBtn.click();
             }}, 150);
         }} else if (key === 'a') {{
-            e.preventDefault();
             var zin = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="in"]');
             if (zin) zin.click();
         }} else if (key === 's') {{
-            e.preventDefault();
             var zout = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
             if (zout) zout.click();
+        }} else {{
+            handled = false;
         }}
+        if (handled) e.preventDefault();
+        return handled;
+    }}
+
+    // 监听 iframe 自身（焦点在图表内时）
+    document.addEventListener('keydown', function(e) {{
+        handleHotkey(e);
     }});
+
+    // 跨平台关键修复：焦点在父页面（Streamlit 主框架）时，
+    // Windows 上按键事件不会冒泡到 iframe，需在父页面捕获并转发。
+    try {{
+        if (window.top && window.top !== window.self) {{
+            window.top.addEventListener('keydown', function(e) {{
+                handleHotkey(e);
+            }});
+        }}
+    }} catch (err) {{
+        // 跨域限制时忽略，不影响 iframe 内的监听
+    }}
 }})();
 </script>
 </body>
