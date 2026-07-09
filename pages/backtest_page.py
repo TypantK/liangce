@@ -167,7 +167,9 @@ def _build_chart_html(fig, version=0, theme="dark", auto_zoom=False):
         include_plotlyjs='cdn',
         full_html=False,
         config={
-            'doubleClick': 'reset',
+            # 注意：不要设 'doubleClick': 'reset'，否则会与下方自定义
+            # plotly_doubleclick（双击放大/重置）冲突并吞掉事件
+            'doubleClick': False,
             'displayModeBar': True,
             'displaylogo': False,
             'modeBarButtons': [
@@ -264,6 +266,26 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         gd.removeAllListeners('plotly_click');
         gd.removeAllListeners('plotly_selected');
         gd.removeAllListeners('plotly_doubleclick');
+
+        // ---- 双击：放大/重置 ----
+        // 双击主图（K线/折线）→ 以双击点为中心放大 60 天窗口；
+        // 双击其它区域（如成交量/空白）→ 重置回全览。
+        gd.on('plotly_doubleclick', function(data) {{
+            if (!gd) return;
+            // 判断双击是否命中主图（row 1）。data 为空或 points 为空时视为空白 → 重置
+            var onMain = !!(data && data.points && data.points.length > 0);
+            if (onMain) {{
+                var pt = data.points[0];
+                var allX = pt.data.x;
+                if (!allX || !allX.length) return;
+                var idx = findDateIndex(allX, pt.x);
+                if (idx < 0) return;
+                zoomToRange(allX, idx - 30, idx + 30);
+            }} else {{
+                // 双击空白：重置为全览
+                Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+            }}
+        }});
 
         gd.on('plotly_click', function(data) {{
             clickCount++;
@@ -371,6 +393,7 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
 <!-- cv:{version} -->
 <script>
 (function() {{
+    // ===== 快捷键处理函数（运行在 iframe 内部，可正确访问 gd / Plotly）=====
     function handleHotkey(e) {{
         // 只处理单字符且非组合键，避免与浏览器/系统快捷键冲突
         if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -403,21 +426,83 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
         return handled;
     }}
 
-    // 监听 iframe 自身（焦点在图表内时）
+    // 1) 焦点在 iframe 内部时，直接监听本页 keydown
     document.addEventListener('keydown', function(e) {{
         handleHotkey(e);
     }});
 
-    // 跨平台关键修复：焦点在父页面（Streamlit 主框架）时，
-    // Windows 上按键事件不会冒泡到 iframe，需在父页面捕获并转发。
-    try {{
-        if (window.top && window.top !== window.self) {{
-            window.top.addEventListener('keydown', function(e) {{
-                handleHotkey(e);
-            }});
-        }}
-    }} catch (err) {{
-        // 跨域限制时忽略，不影响 iframe 内的监听
+    // 2) 焦点在父页面（Streamlit 主框架）时：父页 keydown 通过 postMessage
+    //    转发到本 iframe，由本页 message 监听在「正确的上下文」里执行 handleHotkey。
+    //    这是跨 frame 通信的标准可靠做法，可解决 Windows 上因上下文错位导致
+    //    window.top 回调里访问不到 gd / Plotly 而失效的问题。
+    window.addEventListener('message', function(ev) {{
+        try {{
+            var d = ev.data;
+            if (!d || d.__chartHotkey !== true) return;
+            // 还原一个可用的 KeyboardEvent 风格对象
+            var fake = {{
+                key: d.key,
+                ctrlKey: d.ctrlKey, metaKey: d.metaKey, altKey: d.altKey,
+                preventDefault: function() {{}}
+            }};
+            handleHotkey(fake);
+        }} catch (err) {{}}
+    }});
+
+    function forwardKey(e) {{
+        // 仅转发单字符非组合键
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (!e.key || e.key.length !== 1) return;
+        try {{
+            parent.postMessage({{
+                __chartHotkey: true,
+                key: e.key,
+                ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey
+            }}, '*');
+        }} catch (err) {{}}
+    }}
+
+    // 父页面焦点捕获由外部注入脚本负责（见 chart_hotkey_bridge 注入块），
+    // 这里只声明转发函数，避免在 iframe 内重复监听父页面。
+    window.__chartForwardKey = forwardKey;
+}})();
+</script>
+<script>
+// ===== 父页面按键桥接（注入到 Streamlit 主框架）=====
+// 在父页面上捕获 keydown，若焦点不在输入框/文本域，则转发给图表 iframe。
+(function() {{
+    function injectBridge() {{
+        if (window.__chartHotkeyBridgeInjected) return;
+        window.__chartHotkeyBridgeInjected = true;
+
+        document.addEventListener('keydown', function(e) {{
+            var tag = (document.activeElement || {{}}).tagName || '';
+            if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+            // 找到图表 iframe（st.components.v1.html 生成的 srcdoc iframe）并转发。
+            // 注意：chart_xxx 是内部 Plotly div 的 id，并非 iframe 的 id，
+            // 因此用 srcdoc + 排除 Streamlit 自身 iframe 的方式定位。
+            var frames = document.querySelectorAll('iframe[srcdoc]');
+            for (var i = 0; i < frames.length; i++) {{
+                var f = frames[i];
+                if (!f.contentWindow) continue;
+                if (f.srcdoc && f.srcdoc.indexOf('__chartDebug') !== -1) {{
+                    try {{
+                        f.contentWindow.postMessage({{
+                            __chartHotkey: true,
+                            key: e.key,
+                            ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey
+                        }}, '*');
+                    }} catch (err) {{}}
+                    break;
+                }}
+            }}
+        }}, true);  // 捕获阶段，确保在 iframe 之前拿到事件
+    }}
+
+    if (document.readyState === 'loading') {{
+        document.addEventListener('DOMContentLoaded', injectBridge);
+    }} else {{
+        injectBridge();
     }}
 }})();
 </script>
@@ -1112,7 +1197,7 @@ def _render_fund(item, theme):
         auto_zoom=False,
     )
     st.components.v1.html(chart_html, height=730)
-    st.caption("点击折线放大 | 双击重置 | Q=缩放 W=平移 E=全览")
+    st.caption("点击折线 → 放大 60 天 | 双击主图 → 放大 60 天 / 双击空白 → 重置 | Q=缩放 W=平移 E=全览")
 
     if st.button("重置缩放", key="fund_reset_zoom"):
         st.session_state.fund_chart_version += 1
@@ -1288,7 +1373,7 @@ def _render_backtest(item, theme):
         auto_zoom=False,
     )
     st.components.v1.html(chart_html, height=780)
-    st.caption("点击 K 线 → 放大 60 天 | 双击空白 → 重置 | Q=缩放 W=平移 E=全览")
+    st.caption("点击 K 线 → 放大 60 天 | 双击主图 → 放大 60 天 / 双击空白 → 重置 | Q=缩放 W=平移 E=全览")
 
     if st.button("重置缩放", key="reset_zoom"):
         st.session_state.chart_version += 1

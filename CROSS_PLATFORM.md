@@ -13,26 +13,44 @@
 `document`**。当焦点停留在父页面（Streamlit 主框架）时，Windows 下按键事件不会冒泡到 iframe，
 导致监听收不到事件；macOS 上因焦点管理差异偶然能用，属于"假正常"。
 
-### 修复约定（已修复）
-在注入脚本中 **同时监听父页面（顶层 frame）的 keydown 并转发**到同一个处理函数：
+### 修复约定（已修复 — v2）
+旧方案直接在 `window.top` 上 `addEventListener('keydown', handleHotkey)` 并就地执行。
+**该方案在 Windows 上失效的根因**：`handleHotkey` 内部通过 `window.__chartDebug.getGd()`
+访问图表对象 `gd`，但 `window.__chartDebug` 挂在 **iframe 内部** 的 `window` 上；
+父页面转发的事件回调在父页面上下文执行，访问到的 `window.__chartDebug` 为 `undefined`
+→ `gd` 为 `undefined` → 直接 return，快捷键永远不生效。这是上下文错位，并非焦点问题。
+
+正确做法：**用 `postMessage` 把按键从父页面转发进 iframe，由 iframe 内部（能正确
+访问 `gd` / `Plotly`）执行处理函数**。
 
 ```js
-// iframe 内焦点
-document.addEventListener('keydown', handleHotkey);
-// 父页面焦点（跨平台关键）
-try {
-  if (window.top && window.top !== window.self) {
-    window.top.addEventListener('keydown', handleHotkey);
-  }
-} catch (err) { /* 跨域限制忽略 */ }
+// —— iframe 内部（_build_chart_html 第二个 <script>）——
+window.addEventListener('message', function(ev) {
+  var d = ev.data;
+  if (!d || d.__chartHotkey !== true) return;
+  handleHotkey({ key: d.key, ctrlKey: d.ctrlKey, metaKey: d.metaKey, altKey: d.altKey,
+                 preventDefault: function(){} });
+});
+
+// —— 父页面桥接（_build_chart_html 第三个 <script>）——
+// 在父页面 document 上捕获 keydown（捕获阶段），过滤输入框后 postMessage 给图表 iframe
+document.addEventListener('keydown', function(e) {
+  var tag = (document.activeElement || {}).tagName || '';
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+  var frame = document.querySelector('iframe[id^="chart_"]') || ...;
+  frame.contentWindow.postMessage({ __chartHotkey: true, key: e.key, ... }, '*');
+}, true);
 ```
 
-后续新增任何图表内键盘交互，都必须同时绑定 `document` 与 `window.top`，否则 Windows 必现失效。
+后续新增任何图表内键盘交互，都必须走 `postMessage` 转发 + iframe 内执行，否则 Windows 必现失效。
+**切勿再用 `window.top.addEventListener` 直接调用依赖 iframe 内部变量的函数。**
 
 ### 额外健壮性
 - 处理函数开头过滤组合键：`if (e.ctrlKey || e.metaKey || e.altKey) return;`，避免劫持系统快捷键。
 - 用 `e.key`（而非 `e.keyCode`）判断，注意 `e.key` 可能为空，需 `|| ''` 兜底再 `toLowerCase()`。
 - 输入框/文本域聚焦时不触发：`/^(INPUT|TEXTAREA|SELECT)$/.test(activeElement.tagName)`。
+- 跨 frame 通信用 `postMessage(ev, '*')` 即可（同源 Streamlit 运行时无跨域限制）；
+  不要在父页回调里直接访问 iframe 的 `window` 变量。
 
 ## 2. 通用跨平台约定
 
