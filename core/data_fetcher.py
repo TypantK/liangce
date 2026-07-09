@@ -72,6 +72,8 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
         '开盘': 'open', '收盘': 'close', '最高': 'high', '最低': 'low',
         '成交量': 'volume', '成交额': 'amount',
+        '开盘价': 'open', '收盘价': 'close', '最高价': 'high', '最低价': 'low',
+        '日期': 'date', '时间': 'date',
     }
     # 小写兜底
     for col in list(df.columns):
@@ -309,6 +311,33 @@ def _try_akshare_sector(symbol: str, start: str, end: str) -> pd.DataFrame:
     raise RuntimeError(f"行业板块获取失败: {last_err}")
 
 
+def _try_ths_sector(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """同花顺行业指数（独立域名 10jqka，不受东方财富限流影响）。
+
+    这是板块数据最稳的主路径。symbol 为同花顺行业名称（需与
+    stock_board_industry_name_ths 返回的行业名精确一致，例如
+    '半导体'/'饮料制造'/'其他电源设备' 等）。
+
+    返回归一化后的 OHLCV DataFrame（开/收/高/低/成交量/成交额）。
+    """
+    import akshare as ak
+
+    # 同花顺行业指数接口：symbol 接受精确行业名
+    df = ak.stock_board_industry_index_ths(
+        symbol=symbol,
+        start_date=start.replace("-", ""),
+        end_date=end.replace("-", ""),
+    )
+    if df is None or df.empty:
+        raise RuntimeError(f"同花顺行业指数 {symbol} 返回空数据")
+    df = _normalize_columns(df)
+    if df is None or df.empty:
+        raise RuntimeError(f"同花顺行业指数 {symbol} 归一化后为空")
+    return df
+
+
+
+
 
 
 def _try_akshare_us(symbol: str, start: str, end: str) -> pd.DataFrame:
@@ -393,10 +422,13 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
 
     # ── 2. 构建 fallback 链 ──────────────────────────────────────────
     if symbol.startswith('SECTOR:'):
-        # ── 申万行业板块指数 ──────────────────────────────────────────
+        # ── 申万/同花顺行业板块指数 ──────────────────────────────────
+        # 主路径用同花顺（独立域名，不受东方财富限流影响）；
+        # 兜底仍尝试东方财富直连 + akshare 行业板块接口。
         board = symbol[len('SECTOR:'):]
         chain = [
-            ("akshare 行业板块", lambda: _try_akshare_sector(board, start, end)),
+            ("同花顺行业指数", lambda: _try_ths_sector(board, start, end)),
+            ("东方财富板块直连", lambda: _try_akshare_sector(board, start, end)),
         ]
 
     elif symbol.endswith(('.SZ', '.SH')):
