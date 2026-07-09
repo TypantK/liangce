@@ -104,13 +104,13 @@ def save_stock_prices(symbol: str, df: pd.DataFrame) -> int:
         for r in rows:
             try:
                 conn.execute(
-                    "INSERT INTO stock_prices (symbol, date, open, high, low, close, volume) "
+                    "INSERT OR REPLACE INTO stock_prices (symbol, date, open, high, low, close, volume) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     r,
                 )
                 count += 1
             except sqlite3.IntegrityError:
-                pass  # 主键冲突，跳过
+                pass
         conn.commit()
         return count
     finally:

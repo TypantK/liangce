@@ -416,9 +416,14 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     data_store.init_db()
     if data_store.has_stock_data(symbol, start, end):
         cached = data_store.load_stock_prices(symbol, start, end)
-        if cached is not None and not cached.empty:
+        # 校验缓存有效：行数足够、索引为日期、且最新数据接近 end（否则视为过期）
+        if cached is not None and not cached.empty and len(cached) >= 65 \
+                and isinstance(cached.index, pd.DatetimeIndex) \
+                and (pd.Timestamp(end) - cached.index[-1]).days <= 7:
             print(f"[{symbol}] 命中缓存，共 {len(cached)} 条")
             return cached
+        else:
+            print(f"[{symbol}] 缓存不完整/过期，重新联网获取")
 
     # ── 2. 构建 fallback 链 ──────────────────────────────────────────
     if symbol.startswith('SECTOR:'):
