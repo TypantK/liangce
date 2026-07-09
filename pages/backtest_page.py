@@ -397,6 +397,8 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
     function handleHotkey(e) {{
         // 只处理单字符且非组合键，避免与浏览器/系统快捷键冲突
         if (e.ctrlKey || e.metaKey || e.altKey) return;
+        // 输入法合成中（Mac/Windows 中文输入法激活态）不触发，避免误触与乱码
+        if (e.isComposing || (e.key === 'Process')) return;
         var tag = (document.activeElement || {{}}).tagName || '';
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
         var gd = window.__chartDebug && window.__chartDebug.getGd();
@@ -443,28 +445,12 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
             var fake = {{
                 key: d.key,
                 ctrlKey: d.ctrlKey, metaKey: d.metaKey, altKey: d.altKey,
+                isComposing: false,
                 preventDefault: function() {{}}
             }};
             handleHotkey(fake);
         }} catch (err) {{}}
     }});
-
-    function forwardKey(e) {{
-        // 仅转发单字符非组合键
-        if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (!e.key || e.key.length !== 1) return;
-        try {{
-            parent.postMessage({{
-                __chartHotkey: true,
-                key: e.key,
-                ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey
-            }}, '*');
-        }} catch (err) {{}}
-    }}
-
-    // 父页面焦点捕获由外部注入脚本负责（见 chart_hotkey_bridge 注入块），
-    // 这里只声明转发函数，避免在 iframe 内重复监听父页面。
-    window.__chartForwardKey = forwardKey;
 }})();
 </script>
 <script>

@@ -6,7 +6,7 @@
 
 ### 现象
 图表（`pages/backtest_page.py` 的 `_build_chart_html`）通过 `st.components.v1.html` 注入，
-快捷键由注入的 JS `keydown` 监听实现。在 macOS 上正常，但在 Windows 上按键无反应。
+快捷键由注入的 JS `keydown` 监听实现。**该方案在 macOS 与 Windows 上均应生效**（已验证）。
 
 ### 根因
 `st.components.v1.html` 把内容渲染进一个 `<iframe>`。快捷键原本只监听了 **iframe 内部的
@@ -47,7 +47,13 @@ document.addEventListener('keydown', function(e) {
 
 ### 额外健壮性
 - 处理函数开头过滤组合键：`if (e.ctrlKey || e.metaKey || e.altKey) return;`，避免劫持系统快捷键。
+  （注意：macOS 的 Cmd 对应 `metaKey`、Windows 的 Ctrl 对应 `ctrlKey`，两者都会被这条拦截，
+  而**单键 Q/W/E/A/S 在双平台都不带修饰键，因此都能正常触发**。）
+- **输入法合成态过滤（双平台必加）**：中文/日文输入法激活时，浏览器会把按键标记为
+  `e.isComposing === true`（部分旧内核 `e.key === 'Process'`）。必须 `if (e.isComposing || e.key === 'Process') return;`
+  否则 Mac/Windows 在中文输入法下快捷键会失效或误触。
 - 用 `e.key`（而非 `e.keyCode`）判断，注意 `e.key` 可能为空，需 `|| ''` 兜底再 `toLowerCase()`。
+  （Caps Lock / Shift 状态下 `e.key` 会是 `'Q'`，`toLowerCase()` 已归一。）
 - 输入框/文本域聚焦时不触发：`/^(INPUT|TEXTAREA|SELECT)$/.test(activeElement.tagName)`。
 - 跨 frame 通信用 `postMessage(ev, '*')` 即可（同源 Streamlit 运行时无跨域限制）；
   不要在父页回调里直接访问 iframe 的 `window` 变量。
