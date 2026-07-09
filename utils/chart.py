@@ -238,13 +238,13 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
         fig.add_vline(x=x_date, line_dash='dash', line_color=UP_GREEN,
                        line_width=1.2, opacity=0.50, row=1, col=1)
 
-    # 买入三角标记：绿 ▲，在 K 线最低价下方
+    # 买入三角标记：红 ▼，在 K 线最低价下方
     if bp_idx:
         fig.add_trace(go.Scatter(
             x=bp_idx, y=bp_val, name='买入',
             mode='markers',
             marker=dict(
-                symbol='triangle-up', size=11,
+                symbol='triangle-down', size=11,
                 color=DN_RED,
                 line=dict(color='white', width=1.2),
             ),
@@ -256,13 +256,13 @@ def plot_backtest(data, strategy_name, chart_mode="K线图",
             ),
         ), row=1, col=1)
 
-    # 卖出三角标记：红 ▼，在 K 线最高价上方
+    # 卖出三角标记：绿 ▲，在 K 线最高价上方
     if sp_idx:
         fig.add_trace(go.Scatter(
             x=sp_idx, y=sp_val, name='卖出',
             mode='markers',
             marker=dict(
-                symbol='triangle-down', size=11,
+                symbol='triangle-up', size=11,
                 color=UP_GREEN,
                 line=dict(color='white', width=1.2),
             ),
@@ -525,13 +525,13 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
         fig.add_vline(x=x_date, line_dash="dash", line_color=UP_GREEN,
                        line_width=1.2, opacity=0.50)
 
-    # 买入三角标记：绿 ▲，在净值下方
+    # 买入三角标记：红 ▼，在净值下方
     if bp_idx:
         fig.add_trace(go.Scatter(
             x=bp_idx, y=bp_val, name="买入",
             mode="markers",
             marker=dict(
-                symbol="triangle-up", size=11,
+                symbol="triangle-down", size=11,
                 color=DN_RED,
                 line=dict(color="white", width=1.2),
             ),
@@ -543,13 +543,13 @@ def plot_fund_backtest(data, strategy_name, buy_points=None, sell_points=None,
             ),
         ))
 
-    # 卖出三角标记：红 ▼，在净值上方
+    # 卖出三角标记：绿 ▲，在净值上方
     if sp_idx:
         fig.add_trace(go.Scatter(
             x=sp_idx, y=sp_val, name="卖出",
             mode="markers",
             marker=dict(
-                symbol="triangle-down", size=11,
+                symbol="triangle-up", size=11,
                 color=UP_GREEN,
                 line=dict(color="white", width=1.2),
             ),

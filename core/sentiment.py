@@ -107,10 +107,219 @@ def parse_events_from_search(results: list, keyword: str) -> list[tuple[str, int
             else:
                 date_str = default_date
 
-        events.append((date_str, score, title))
+        if score != 0:  # 跳过无情感倾向的新闻
+            events.append((date_str, score, title))
 
     events.sort(key=lambda x: x[0])
     return events
+
+
+# ---- 知名分析师/博主/基金经理列表 ----
+KNOWN_ANALYSTS = [
+    "但斌", "林园", "李大霄", "任泽平", "洪灏",
+    "张忆东", "荀玉根", "蔡嵩松", "葛兰", "张坤",
+    "谢治宇", "朱少醒", "刘格菘", "傅鹏博", "董承非",
+    "萧楠", "胡昕炜", "周应波", "杨锐文", "李迅雷",
+    "赵晓光", "高善文", "徐彪", "戴康",
+]
+
+# ---- 标的→板块映射（常见标的快速匹配） ----
+_SECTOR_HINTS = {
+    "白酒": ["茅台", "五粮液", "泸州", "汾酒", "洋河", "古井", "酒鬼", "水井坊"],
+    "消费": ["茅台", "五粮液", "伊利", "蒙牛", "海天", "牧原", "双汇", "金龙鱼", "农夫山泉"],
+    "医药": ["恒瑞", "药明", "片仔癀", "迈瑞", "爱尔", "智飞", "长春高新", "通策", "康龙"],
+    "新能源": ["宁德", "比亚迪", "隆基", "通威", "阳光", "亿纬", "赣锋", "天齐", "恩捷", "先导"],
+    "半导体": ["中芯", "韦尔", "兆易", "北方华创", "卓胜", "闻泰", "紫光", "长电", "华天"],
+    "AI": ["科大讯飞", "商汤", "寒武纪", "海康", "大华", "依图", "云从", "拓尔思"],
+    "银行": ["工商", "建设", "农业", "中国银行", "招商", "兴业", "浦发", "民生", "平安银行", "交通"],
+    "券商": ["中信", "华泰", "海通", "国君", "广发", "招商证券", "申万", "银河", "国信", "东方财富"],
+    "地产": ["万科", "保利", "碧桂园", "融创", "龙湖", "华润置地", "中海", "招商蛇口", "金地"],
+    "互联网": ["腾讯", "阿里", "美团", "京东", "拼多多", "网易", "百度", "快手", "字节", "小米"],
+    "光伏": ["隆基", "通威", "中环", "晶澳", "天合", "晶科", "福斯特", "阳光", "锦浪"],
+    "汽车": ["比亚迪", "蔚来", "理想", "小鹏", "长安", "长城", "上汽", "吉利", "赛力斯"],
+    "煤炭": ["神华", "陕煤", "兖矿", "中煤", "潞安", "平煤", "山煤"],
+    "电力": ["长江电力", "华能", "华电", "国电", "大唐", "三峡", "国投"],
+}
+
+# ---- 板块关键词列表，用于从新闻中提取板块线索 ----
+_PLATE_KEYWORDS = [
+    "白酒", "消费", "医药", "新能源", "半导体", "AI", "银行",
+    "券商", "地产", "互联网", "光伏", "汽车", "煤炭", "电力",
+    "钢铁", "有色", "军工", "化工", "农业", "食品", "家电",
+    "建材", "机械", "电子", "通信", "传媒", "计算机", "软件",
+    "旅游", "航空", "物流", "环保", "教育", "保险", "医疗",
+]
+
+
+def _extract_sectors_from_name(name: str) -> list[str]:
+    """从标的名称中提取可能的板块关键词。"""
+    sectors = []
+    for sector, hints in _SECTOR_HINTS.items():
+        for hint in hints:
+            if hint in name:
+                sectors.append(sector)
+                break
+    # 去重 + 保持顺序
+    return list(dict.fromkeys(sectors))
+
+
+def build_search_keywords(name: str, sector: str = None) -> list[tuple[str, str]]:
+    """
+    根据标的名称自动生成多组搜索关键词。
+
+    返回: [(标签, 搜索关键词), ...]
+
+    生成规则:
+    1. 标的名称本身
+    2. 标的+板块关键词（从名称或传入 sector 推断）
+    3. 标的+知名分析师/博主
+    4. 纯板块关键词（用于板块新闻）
+    """
+    pairs = []
+
+    # 1. 标的名称
+    pairs.append(("标的", name))
+
+    # 2. 推断板块
+    sectors = _extract_sectors_from_name(name)
+    if sector and sector not in sectors:
+        sectors.append(sector)
+
+    for s in sectors[:3]:  # 最多 3 个板块
+        pairs.append(("板块", f"{name} {s}板块"))
+        pairs.append(("板块", f"{s}板块"))
+
+    # 3. 知名分析师/博主（最多 5 位）
+    for analyst in KNOWN_ANALYSTS[:5]:
+        pairs.append(("大V", f"{name} {analyst}"))
+
+    return pairs
+
+
+def deduplicate_news(news_list: list[dict]) -> list[dict]:
+    """
+    新闻去重：按标题相似度合并。
+
+    策略：
+    1. 完全相同的 title 只保留第一条
+    2. 标题包含关系（短标题完全出现在长标题中）→ 保留较长的
+    3. URL 相同 → 保留第一条
+    """
+    if not news_list:
+        return []
+
+    seen_urls = set()
+    result = []
+
+    for item in news_list:
+        url = item.get("url", "")
+        title = item.get("title", "").strip()
+
+        # URL 去重
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+
+        # 标题包含去重：新标题是已有标题的子串则跳过，已有标题是新标题的子串则替换
+        is_dup = False
+        for i, existing in enumerate(result):
+            existing_title = existing.get("title", "").strip()
+            if not title or not existing_title:
+                continue
+            if title == existing_title:
+                is_dup = True
+                break
+            if len(title) > len(existing_title) and existing_title in title:
+                # 新标题更长 → 替换旧条目
+                result[i] = item
+                is_dup = True
+                break
+            if len(title) < len(existing_title) and title in existing_title:
+                # 旧标题更长 → 丢弃新条目
+                is_dup = True
+                break
+
+        if not is_dup:
+            result.append(item)
+
+    return result
+
+
+def search_and_parse_events(
+    fetch_fn,
+    name: str,
+    sector: str = None,
+    max_per_query: int = 6,
+) -> list[tuple[str, int, str]]:
+    """
+    使用多组关键词并行搜索、解析、去重，返回情绪事件列表。
+
+    fetch_fn: callable(query, max_results) -> list[dict]
+              实际搜索函数（如 sentiment_fetcher.fetch_news）
+    name:     标的名称
+    sector:   可选，行业分类信息
+
+    返回: [(date_str, score, title), ...]
+
+    流程:
+    1. 生成多组搜索关键词
+    2. 逐组调用 fetch_fn 抓取
+    3. 汇总所有结果并去重
+    4. 解析为情绪事件
+    """
+    keywords_pairs = build_search_keywords(name, sector)
+    all_raw = []
+    seen_queries = set()
+
+    for label, query in keywords_pairs:
+        if query in seen_queries:
+            continue
+        seen_queries.add(query)
+        try:
+            results = fetch_fn(query, max_per_query)
+            if results:
+                # 标记搜索来源
+                for r in results:
+                    r["_search_query"] = query
+                    r["_search_label"] = label
+                # 相关性过滤（财经关键词或 query 本身）
+                from core.sentiment_fetcher import _is_finance_relevant
+                results = [r for r in results if _is_finance_relevant(
+                    r.get("title", ""), r.get("snippet", ""), query)]
+                all_raw.extend(results)
+        except Exception:
+            # 单个查询失败不阻塞其他查询
+            pass
+
+    # 去重
+    all_raw = deduplicate_news(all_raw)
+
+    # 解析为事件
+    all_events = []
+    for item in all_raw:
+        title = item.get("title", "")
+        snippet = item.get("snippet", item.get("description", ""))
+        combined = f"{title} {snippet}"
+        score = score_headline(combined)
+
+        now = datetime.now()
+        date_str = None
+        m = re.search(r"(\d{4})-(\d{2})-(\d{2})", combined)
+        if m:
+            date_str = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        else:
+            m = re.search(r"(\d{1,2})月(\d{1,2})日", combined)
+            if m:
+                date_str = f"{now.year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+            else:
+                date_str = now.strftime("%Y-%m-%d")
+
+        if score != 0:
+            all_events.append((date_str, score, title))
+
+    all_events.sort(key=lambda x: x[0])
+    return all_events
 
 
 def get_sentiment_for_date(
