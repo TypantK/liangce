@@ -640,6 +640,7 @@ def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_s
             "计划数量": str(base_qty), "实际数量": str(int(buy_qty)),
             "情绪得分": sent_score, "情绪乘数": sent_mult, "仓位调整": sent_desc if sent_desc else "",
             "原因": t.get("买入原因", ""), "余额": f"¥{running_cash:,.0f}",
+            "情绪标签": t.get("情绪标签", ""),
         })
         pnl_str = t["盈亏"]
         pnl_val = float(pnl_str) if pnl_str else 0.0
@@ -651,6 +652,7 @@ def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_s
             "原因": t.get("卖出原因", ""),
             "余额": f"¥{running_cash:,.0f}",
             "盈亏金额": f"{pnl_val:+,.2f}",
+            "情绪标签": t.get("情绪标签", ""),
         })
 
     html_parts = [
@@ -674,7 +676,10 @@ def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_s
     ]
 
     for r in trade_rows:
-        if r["方向"] == "buy":
+        if r.get("情绪标签") == "情绪拦截":
+            bg = "#ffffff"
+            dir_html = '<span style="color:#9e9e9e;font-weight:bold">拦截</span>'
+        elif r["方向"] == "buy":
             bg = "#a5d6a7"
             dir_html = '<span style="color:#2e7d32;font-weight:bold">买</span>'
         else:

@@ -2,12 +2,15 @@
 """
 数据获取模块 - 多源自动降级架构
 支持 A 股 / 美股 / 加密货币，每条路径均有 fallback 链，国内网络无需翻墙。
+增加 SQLite 缓存层：首次联网获取后本地持久化，后续读取直接走缓存。
 """
 
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Optional, List, Dict
+
+from . import data_store
 
 STOCK_POOL = {
     "平安银行":     "000001.SZ",
@@ -234,8 +237,16 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
         end = datetime.now().strftime('%Y-%m-%d')
     if start is None:
         start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    # ── 1. 先查 SQLite 缓存 ──────────────────────────────────────────
+    data_store.init_db()
+    if data_store.has_stock_data(symbol, start, end):
+        cached = data_store.load_stock_prices(symbol, start, end)
+        if cached is not None and not cached.empty:
+            print(f"[{symbol}] 命中缓存，共 {len(cached)} 条")
+            return cached
+
+    # ── 2. 构建 fallback 链 ──────────────────────────────────────────
     if symbol.endswith(('.SZ', '.SH')):
-        # ── A 股 ──────────────────────────────────────────────────────────
         market = "sh" if symbol.endswith('.SH') else "sz"
         raw = symbol.replace('.SZ', '').replace('.SH', '')
         chain = [
@@ -245,7 +256,6 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
         ]
 
     elif symbol.endswith('USDT'):
-        # ── 加密货币 ──────────────────────────────────────────────────────
         chain = [
             ("ccxt+Gate.io", lambda: _try_ccxt("gate", symbol, start, end, timeout=30000)),
             ("ccxt+OKX",     lambda: _try_ccxt("okx", symbol, start, end, timeout=15000)),
@@ -253,22 +263,30 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
         ]
 
     else:
-        # ── 美股 ──────────────────────────────────────────────────────────
         chain = [
             ("open-stock-data", lambda: _try_open_stock_data(symbol, "us", start, end)),
             ("akshare 美股",    lambda: _try_akshare_us(symbol, start, end)),
         ]
 
-    # 遍历 fallback 链
+    # ── 3. 遍历 fallback 链 ─────────────────────────────────────────
     for src_name, fetcher in chain:
         try:
             df = fetcher()
             if df is not None and not df.empty:
+                # 写入缓存
+                written = data_store.save_stock_prices(symbol, df)
+                print(f"[{symbol}] {src_name} 成功，缓存 {written} 条")
                 return df
         except Exception as e:
             print(f"[{symbol}] {src_name} 失败: {e}")
 
-    print(f"[{symbol}] 所有数据源均失败")
+    # ── 4. 联网全部失败，尝试返回缓存中的部分数据 ─────────────────
+    cached = data_store.load_stock_prices(symbol, start, end)
+    if cached is not None and not cached.empty:
+        print(f"[{symbol}] 联网失败，使用缓存中部分数据 ({len(cached)} 条)")
+        return cached
+
+    print(f"[{symbol}] 所有数据源均失败，且无缓存")
     return None
 
 
@@ -296,6 +314,106 @@ def fund_nav_to_ohlcv(nav_df: pd.DataFrame) -> pd.DataFrame:
     df["volume"] = 1000000
 
     return df[["open", "high", "low", "close", "volume"]]
+
+
+def get_fund_nav(fund_code: str, start: Optional[str] = None,
+                 end: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """
+    获取基金净值数据（带 SQLite 缓存）。
+
+    fund_code: 基金代码，如 "000001"（华夏成长混合）
+    start/end: 日期 YYYY-MM-DD，默认最近一年。
+
+    数据源：akshare → open-stock-data（fallback）。
+    返回 DataFrame，含 date / nav / acc_nav 列，按日期升序。
+    """
+    if end is None:
+        end = datetime.now().strftime('%Y-%m-%d')
+    if start is None:
+        start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+    # ── 1. 先查缓存 ──────────────────────────────────────────────────
+    data_store.init_db()
+    cached = data_store.load_fund_nav(fund_code, start, end)
+    if cached is not None and not cached.empty:
+        print(f"[基金 {fund_code}] 命中缓存，共 {len(cached)} 条")
+        return cached
+
+    # ── 2. 联网获取 ──────────────────────────────────────────────────
+    records: List[Dict] = []
+    df = None
+
+    # 尝试 akshare
+    try:
+        import akshare as ak
+        raw = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+        if raw is not None and not raw.empty:
+            # akshare 返回的列名可能不同版本有差异，做兼容
+            date_col = None
+            nav_col = None
+            for col in raw.columns:
+                low = col.lower().replace(" ", "")
+                if "净值日期" in col or low in ("date", "净值日期"):
+                    date_col = col
+                elif "单位净值" in col or low == "nav":
+                    nav_col = col
+
+            if date_col is None:
+                # 尝试把第一列当日期
+                date_col = raw.columns[0]
+            if nav_col is None and len(raw.columns) >= 2:
+                nav_col = raw.columns[1]
+
+            for _, row in raw.iterrows():
+                d = str(row[date_col])[:10]
+                nv = row[nav_col] if nav_col else None
+                records.append({"date": d, "nav": nv, "acc_nav": None})
+    except Exception as e:
+        print(f"[基金 {fund_code}] akshare 失败: {e}")
+
+    # 如果 akshare 失败，尝试 open-stock-data
+    if not records:
+        try:
+            from open_stock_data.tools import fund_nav as osd_fund_nav
+            raw = osd_fund_nav(fund_code)
+            if raw is not None and not raw.empty:
+                for _, row in raw.iterrows():
+                    records.append({
+                        "date": str(row.get("date", ""))[:10],
+                        "nav": row.get("nav"),
+                        "acc_nav": row.get("acc_nav"),
+                    })
+        except Exception as e:
+            print(f"[基金 {fund_code}] open-stock-data 失败: {e}")
+
+    # ── 3. 写入缓存并返回 ────────────────────────────────────────────
+    if records:
+        data_store.save_fund_nav(fund_code, records)
+        print(f"[基金 {fund_code}] 联网获取成功，缓存 {len(records)} 条")
+
+        # 构建 DataFrame 返回
+        data_rows = []
+        for r in records:
+            try:
+                t = pd.Timestamp(r["date"])
+                if pd.Timestamp(start) <= t <= pd.Timestamp(end):
+                    data_rows.append(r)
+            except Exception:
+                pass
+        if data_rows:
+            df = pd.DataFrame(data_rows)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").set_index("date")
+            return df
+
+    # ── 4. 联网全部失败，尝试返回缓存中已有数据 ──────────────────────
+    cached = data_store.load_fund_nav(fund_code, start, end)
+    if cached is not None and not cached.empty:
+        print(f"[基金 {fund_code}] 联网失败，使用缓存中部分数据 ({len(cached)} 条)")
+        return cached
+
+    print(f"[基金 {fund_code}] 所有数据源均失败，且无缓存")
+    return None
 
 
 def generate_demo_data(n_bars: int = 300) -> pd.DataFrame:

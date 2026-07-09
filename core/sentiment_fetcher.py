@@ -289,9 +289,6 @@ def _sample_news(query: str) -> list[dict]:
       day-3 ~ day-2: 利空初现，买入暂停
       day-1 ~ today: 强利空爆发(sentiment < -3)，触发极端利空强制平仓
     """
-    def _search_url(title: str) -> str:
-        return "https://news.google.com/rss/search?q=" + urllib.parse.quote(title) + "&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
-
     now = datetime.now()
     d7 = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     d6 = (now - timedelta(days=6)).strftime("%Y-%m-%d")
@@ -303,19 +300,19 @@ def _sample_news(query: str) -> list[dict]:
 
     return [
         # ---- day-7 ~ day-5: 纯利好 ----
-        {"title": f"机构看好{query}赛道：行业景气度持续提升", "snippet": f"日期: {d7} 多家券商发布{query}行业研报，评级上调至增持。", "url": _search_url(f"机构看好{query} 行业景气度"), "source": "sample-bull"},
-        {"title": f"{query}龙头业绩超预期，盈利大幅增长", "snippet": f"日期: {d7} {query}龙头公布季报，净利润同比增长45%，远超预期。", "url": _search_url(f"{query} 龙头 业绩 超预期"), "source": "sample-bull"},
-        {"title": f"{query}板块利好出台，多只个股涨停创新高", "snippet": f"日期: {d6} {query}板块受政策利好带动，多只成分股涨停，板块指数创年内新高。", "url": _search_url(f"{query} 板块 利好 涨停"), "source": "sample-bull"},
-        {"title": f"北向资金大幅流入{query}板块，主力加仓信号", "snippet": f"日期: {d6} 北向资金今日净流入{query}板块超50亿，市场看多情绪浓厚。", "url": _search_url(f"北向资金 {query} 主力加仓"), "source": "sample-bull"},
-        {"title": f"政策扶持{query}产业，减税降费利好板块", "snippet": f"日期: {d5} 国务院发布产业扶持政策，{query}行业迎来实质性利好。", "url": _search_url(f"政策扶持{query} 减税降费"), "source": "sample-bull"},
-        {"title": f"{query}签下重大海外订单，国际业务突破", "snippet": f"日期: {d5} {query}头部企业宣布与海外客户签订十年合作协议，出海战略加速落地。", "url": _search_url(f"{query} 海外订单 国际业务"), "source": "sample-bull"},
+        {"title": f"机构看好{query}赛道：行业景气度持续提升", "snippet": f"日期: {d7} 多家券商发布{query}行业研报，评级上调至增持。", "url": "", "source": "sample-bull"},
+        {"title": f"{query}龙头业绩超预期，盈利大幅增长", "snippet": f"日期: {d7} {query}龙头公布季报，净利润同比增长45%，远超预期。", "url": "", "source": "sample-bull"},
+        {"title": f"{query}板块利好出台，多只个股涨停创新高", "snippet": f"日期: {d6} {query}板块受政策利好带动，多只成分股涨停，板块指数创年内新高。", "url": "", "source": "sample-bull"},
+        {"title": f"北向资金大幅流入{query}板块，主力加仓信号", "snippet": f"日期: {d6} 北向资金今日净流入{query}板块超50亿，市场看多情绪浓厚。", "url": "", "source": "sample-bull"},
+        {"title": f"政策扶持{query}产业，减税降费利好板块", "snippet": f"日期: {d5} 国务院发布产业扶持政策，{query}行业迎来实质性利好。", "url": "", "source": "sample-bull"},
+        {"title": f"{query}签下重大海外订单，国际业务突破", "snippet": f"日期: {d5} {query}头部企业宣布与海外客户签订十年合作协议，出海战略加速落地。", "url": "", "source": "sample-bull"},
         # ---- day-3 ~ day-2: 利空开始浮现 ----
-        {"title": f"监管层关注{query}领域风险——短期利空需警惕", "snippet": f"日期: {d3} 监管部门就{query}行业发布风险提示函，涉及合规和数据安全问题。", "url": _search_url(f"监管 {query} 风险提示"), "source": "sample-bear"},
-        {"title": f"国际制裁波及{query}产业链，核心零部件面临断供风险", "snippet": f"日期: {d2} 新一轮制裁名单涵盖{query}上游供应链，多家企业面临关键零部件断供危机。", "url": _search_url(f"{query} 制裁 断供"), "source": "sample-bear"},
+        {"title": f"监管层关注{query}领域风险——短期利空需警惕", "snippet": f"日期: {d3} 监管部门就{query}行业发布风险提示函，涉及合规和数据安全问题。", "url": "", "source": "sample-bear"},
+        {"title": f"国际制裁波及{query}产业链，核心零部件面临断供风险", "snippet": f"日期: {d2} 新一轮制裁名单涵盖{query}上游供应链，多家企业面临关键零部件断供危机。", "url": "", "source": "sample-bear"},
         # ---- day-1 ~ today: 强利空爆发 ----
-        {"title": f"突发：{query}龙头遭监管立案调查，股价暴跌触发熔断", "snippet": f"日期: {d1} 监管机构宣布对{query}龙头企业进行立案调查，涉嫌信息披露违规和内幕交易。", "url": _search_url(f"{query} 监管 立案调查 暴跌"), "source": "sample-strong-bear"},
-        {"title": f"{query}行业裁员潮蔓延，多家头部企业宣布大规模优化", "snippet": f"日期: {d1} 多家{query}企业发布裁员公告，市场对行业景气度前景表示担忧。", "url": _search_url(f"{query} 裁员"), "source": "sample-strong-bear"},
-        {"title": f"{query}行业评级遭集体下调，多家机构看空后市", "snippet": f"日期: {d0} 受监管和供应链双重压力，多家券商下调{query}板块评级至减持。", "url": _search_url(f"{query} 评级下调 看空"), "source": "sample-strong-bear"},
+        {"title": f"突发：{query}龙头遭监管立案调查，股价暴跌触发熔断", "snippet": f"日期: {d1} 监管机构宣布对{query}龙头企业进行立案调查，涉嫌信息披露违规和内幕交易。", "url": "", "source": "sample-strong-bear"},
+        {"title": f"{query}行业裁员潮蔓延，多家头部企业宣布大规模优化", "snippet": f"日期: {d1} 多家{query}企业发布裁员公告，市场对行业景气度前景表示担忧。", "url": "", "source": "sample-strong-bear"},
+        {"title": f"{query}行业评级遭集体下调，多家机构看空后市", "snippet": f"日期: {d0} 受监管和供应链双重压力，多家券商下调{query}板块评级至减持。", "url": "", "source": "sample-strong-bear"},
     ]
 
 

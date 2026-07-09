@@ -86,30 +86,37 @@ def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name):
             signal_desc = "当前持仓中"
             signal_date = now.strftime('%Y-%m-%d')
         elif trade_log:
-            last_trade = trade_log[-1]
-            bi = min(last_trade['baropen'], len(data) - 1)
-            si = min(last_trade['barclose'], len(data) - 1)
+            # 从后往前找到第一笔真实交易（跳过情绪拦截的 baropen=0 假交易）
+            last_trade = None
+            for t in reversed(trade_log):
+                if t.get('baropen', 0) > 0 or t.get('barclose', 0) > 0:
+                    last_trade = t
+                    break
 
-            open_date = data.index[bi]
-            close_date = data.index[si]
+            if last_trade is not None:
+                raw_bo = last_trade['baropen']
+                raw_bc = last_trade['barclose']
+                data_len = len(data)
 
-            if len(data) >= 3:
-                last_3 = data.index[-3:]
+                # 仅当 bar 索引在数据范围内且落在最后 2 根 bar 时才视为新鲜信号
+                # 不使用 min() 夹紧，避免越界索引被强制拉到末尾造成假信号
+                is_open_fresh = 0 < raw_bo < data_len and raw_bo >= data_len - 2
+                is_close_fresh = 0 < raw_bc < data_len and raw_bc >= data_len - 2
+
+                if is_close_fresh:
+                    signal = "卖出信号"
+                    signal_date = data.index[raw_bc].strftime('%Y-%m-%d')
+                    reason = last_trade.get('exit_reason', '策略卖出信号')
+                    signal_desc = f"卖出价 {last_trade['exit']:.2f}，原因：{reason}"
+                elif is_open_fresh:
+                    signal = "买入信号"
+                    signal_date = data.index[raw_bo].strftime('%Y-%m-%d')
+                    reason = last_trade.get('entry_reason', '策略买入信号')
+                    signal_desc = f"买入价 {last_trade['entry']:.2f}，原因：{reason}"
+                else:
+                    signal_desc = "最近一笔真实交易不在末尾 2 日内"
             else:
-                last_3 = data.index
-
-            if close_date in last_3:
-                signal = "卖出信号"
-                signal_date = close_date.strftime('%Y-%m-%d')
-                reason = last_trade.get('exit_reason', '策略卖出信号')
-                signal_desc = f"卖出价 {last_trade['exit']:.2f}，原因：{reason}"
-            elif open_date in last_3:
-                signal = "买入信号"
-                signal_date = open_date.strftime('%Y-%m-%d')
-                reason = last_trade.get('entry_reason', '策略买入信号')
-                signal_desc = f"买入价 {last_trade['entry']:.2f}，原因：{reason}"
-            else:
-                signal_desc = "最近一笔交易不在近 3 日内"
+                signal_desc = "无真实交易记录"
 
         return {
             'symbol': symbol_name,

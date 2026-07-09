@@ -595,9 +595,10 @@ class VWAPMACDStrategy(NotifyOrderMixin, bt.Strategy):
     )
 
     def __init__(self):
-        # 用收盘价和成交量手工构造 VWAP
+        # 用典型价格和成交量手工构造滚动 VWAP
         typical = (self.data.high + self.data.low + self.data.close) / 3.0
-        self.vwap = (typical * self.data.volume).sum() / self.data.volume.sum()
+        tp_x_vol = typical * self.data.volume
+        self.vwap = bt.indicators.SumN(tp_x_vol, period=self.p.vwap_period) / bt.indicators.SumN(self.data.volume, period=self.p.vwap_period)
         # MACD 基于 VWAP
         self.macd = bt.indicators.MACD(
             self.vwap,
