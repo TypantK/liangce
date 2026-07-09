@@ -25,7 +25,7 @@ class FixedFractionSizer(BaseSizer):
         self.fraction = fraction
 
     def calc_size(self, cash, price, **kwargs):
-        return cash * self.fraction / price
+        return int(max(0, cash * self.fraction / price))
 
 
 # ============================================================
@@ -53,7 +53,7 @@ class KellySizer(BaseSizer):
         f = max(0.0, min(f, 1.0))          # 裁剪到 [0, 1]
         if self.half_kelly:
             f = f / 2.0
-        return cash * f / price
+        return int(max(0, cash * f / price))
 
 
 # ============================================================
@@ -75,7 +75,7 @@ class ATRSizer(BaseSizer):
         atr = kwargs.get('atr', price * 0.02)   # 默认按价格 2% 估算
         if atr <= 0:
             return 0
-        return (cash * self.risk_pct) / (self.atr_multiplier * atr)
+        return int(max(0, (cash * self.risk_pct) / (self.atr_multiplier * atr)))
 
 
 # ============================================================
@@ -100,7 +100,7 @@ class EqualRiskSizer(BaseSizer):
         loss_per_share = price * stop_pct
         if loss_per_share <= 0:
             return 0
-        return max_loss / loss_per_share
+        return int(max(0, max_loss / loss_per_share))
 
 
 # ============================================================

@@ -5,9 +5,44 @@
 """
 
 from datetime import datetime, timedelta
+import os
 import pandas as pd
 import numpy as np
 from typing import Optional
+
+# ---------------------------------------------------------------------------
+#  本地缓存层（提升“快”：相同标的+区间直接读盘，避免重复联网）
+# ---------------------------------------------------------------------------
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data_cache')
+CACHE_TTL_DAYS = 1  # 缓存有效期（天），过期自动重新联网拉取
+
+
+def _safe_name(symbol: str) -> str:
+    return symbol.replace('/', '_').replace('\\', '_').replace(':', '_')
+
+
+def _cache_path(symbol: str, start: str, end: str, freq: str) -> str:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    return os.path.join(CACHE_DIR, f"{_safe_name(symbol)}_{start}_{end}_{freq}.csv")
+
+
+def _load_cache(path: str):
+    if not os.path.exists(path):
+        return None
+    age_days = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(path))).days
+    if age_days > CACHE_TTL_DAYS:
+        return None
+    try:
+        return pd.read_csv(path, index_col=0, parse_dates=True)
+    except Exception:
+        return None
+
+
+def _save_cache(path: str, df: pd.DataFrame):
+    try:
+        df.to_csv(path)
+    except Exception:
+        pass
 
 STOCK_POOL = {
     "平安银行":     "000001.SZ",
@@ -220,13 +255,14 @@ def _try_ccxt(exchange_id: str, symbol: str, start: str,
 def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] = None,
                    freq: str = "1d") -> Optional[pd.DataFrame]:
     """
-    获取真实股票数据（多源自动降级）。
+    获取真实股票数据（多源自动降级 + 本地缓存）。
 
     A 股 (.SZ/.SH)：open-stock-data → baostock 直连 → akshare
     加密货币 (USDT)：ccxt+OKX → ccxt+Binance
     美股 (其他)：    open-stock-data → akshare 美股接口
 
     国内网络无需翻墙即可获取 A 股和美股数据。
+    相同标的+区间会自动缓存到本地（默认 1 天），第二次起秒级返回，避免重复联网。
 
     start / end 默认为最近一年至今。
     """
@@ -234,6 +270,13 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
         end = datetime.now().strftime('%Y-%m-%d')
     if start is None:
         start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+    # 先查本地缓存（命中则直接返回，秒级且避免重复联网）
+    cache_path = _cache_path(symbol, start, end, freq)
+    cached = _load_cache(cache_path)
+    if cached is not None:
+        return cached
+
     if symbol.endswith(('.SZ', '.SH')):
         # ── A 股 ──────────────────────────────────────────────────────────
         market = "sh" if symbol.endswith('.SH') else "sz"
@@ -264,6 +307,7 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
         try:
             df = fetcher()
             if df is not None and not df.empty:
+                _save_cache(cache_path, df)
                 return df
         except Exception as e:
             print(f"[{symbol}] {src_name} 失败: {e}")

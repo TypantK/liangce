@@ -23,7 +23,7 @@ def render():
 
         ### 技术栈
         - Python + Streamlit + Backtrader
-        - macOS 原生兼容
+        - 跨平台兼容（Windows / macOS / Linux）
         """)
 
     with col2:
@@ -36,4 +36,4 @@ def render():
         """)
 
     st.divider()
-    st.caption("v1.0 — 由 Marvis 搭建 | 运行在 macOS 本地")
+    st.caption("v1.0 — 由 Marvis 搭建 | 运行在本地")

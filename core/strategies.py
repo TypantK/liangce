@@ -579,6 +579,33 @@ class ParabolicSARStrategy(NotifyOrderMixin, bt.Strategy):
 # ============================================================
 #  策略 12：成交量加权 MACD（预测型）
 # ============================================================
+class VWAPIndicator(bt.Indicator):
+    """
+    滚动 VWAP（成交量加权均价）指标。
+    计算最近 period 根 bar 的成交量加权典型价，
+    返回一条随价格演化的指标线（而非标量），供 MACD 使用。
+    """
+    lines = ('vwap',)
+    params = (('period', 20),)
+
+    def __init__(self):
+        self.addminperiod(self.p.period)
+
+    def next(self):
+        p = self.p.period
+        size = min(p, len(self.data))
+        hi = np.array(self.data.high.get(size=size), dtype=float)
+        lo = np.array(self.data.low.get(size=size), dtype=float)
+        cl = np.array(self.data.close.get(size=size), dtype=float)
+        vol = np.array(self.data.volume.get(size=size), dtype=float)
+        typical = (hi + lo + cl) / 3.0
+        vol_sum = vol.sum()
+        if vol_sum <= 0:
+            self.lines.vwap[0] = cl[-1]
+        else:
+            self.lines.vwap[0] = (typical * vol).sum() / vol_sum
+
+
 class VWAPMACDStrategy(NotifyOrderMixin, bt.Strategy):
     """
     成交量加权 MACD 策略。
@@ -595,9 +622,8 @@ class VWAPMACDStrategy(NotifyOrderMixin, bt.Strategy):
     )
 
     def __init__(self):
-        # 用收盘价和成交量手工构造 VWAP
-        typical = (self.data.high + self.data.low + self.data.close) / 3.0
-        self.vwap = (typical * self.data.volume).sum() / self.data.volume.sum()
+        # 用收盘价和成交量构造滚动 VWAP 指标线
+        self.vwap = VWAPIndicator(self.data, period=self.p.vwap_period)
         # MACD 基于 VWAP
         self.macd = bt.indicators.MACD(
             self.vwap,

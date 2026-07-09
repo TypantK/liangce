@@ -26,3 +26,6 @@ env/
 
 # Backup files
 *.bak
+
+# 本地数据缓存（由 core/data_fetcher.py 自动生成）
+data_cache/

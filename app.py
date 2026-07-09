@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 「量策」个人理财工具箱 —— Web 主入口
-启动命令: /usr/bin/python3 -m streamlit run app.py
+启动命令: python -m streamlit run app.py
 """
 
 import sys, os
@@ -15,6 +15,7 @@ st.set_page_config(page_title="量策", page_icon="📊", layout="wide")
 # ====================== 页面路由 ======================
 PAGES = {
     "发现": "pages.discover_page",
+    "板块预测": "pages.sector_prediction",
     "策略回测": "pages.backtest_page",
     "参数优化": "pages.optimize_page",
     "关于": "pages.about_page",
@@ -27,7 +28,7 @@ with st.sidebar:
     st.divider()
     page = st.radio("导航", list(PAGES.keys()), label_visibility="collapsed")
     st.divider()
-    st.caption("v1.0 ｜ macOS")
+    st.caption("v1.0 ｜ 本地")
 
 # 渲染页面
 module_name = PAGES[page]
