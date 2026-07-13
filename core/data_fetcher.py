@@ -393,7 +393,7 @@ def _try_ccxt(exchange_id: str, symbol: str, start: str,
 # ---------------------------------------------------------------------------
 
 def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] = None,
-                   freq: str = "1d") -> Optional[pd.DataFrame]:
+                   freq: str = "1d", force_refresh: bool = False) -> Optional[pd.DataFrame]:
     """
     获取真实股票数据（多源自动降级 + 本地缓存）。
 
@@ -406,15 +406,17 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     相同标的+区间会自动缓存到本地（默认 1 天），第二次起秒级返回，避免重复联网。
 
     start / end 默认为最近一年至今。
+    force_refresh: 为 True 时跳过本地缓存、强制重新联网拉取最新行情
+                   （用于用户主动点击「开始预测」等需要最新数据的场景）。
     """
     if end is None:
         end = datetime.now().strftime('%Y-%m-%d')
     if start is None:
         start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
 
-    # ── 1. 先查 SQLite 缓存 ──────────────────────────────────────────
+    # ── 1. 先查 SQLite 缓存（force_refresh 时跳过）────────────────────
     data_store.init_db()
-    if data_store.has_stock_data(symbol, start, end):
+    if not force_refresh and data_store.has_stock_data(symbol, start, end):
         cached = data_store.load_stock_prices(symbol, start, end)
         # 校验缓存有效：行数足够、索引为日期、且最新数据接近 end（否则视为过期）
         if cached is not None and not cached.empty and len(cached) >= 65 \
@@ -424,6 +426,8 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
             return cached
         else:
             print(f"[{symbol}] 缓存不完整/过期，重新联网获取")
+    elif force_refresh:
+        print(f"[{symbol}] 强制刷新，跳过缓存重新联网获取")
 
     # ── 2. 构建 fallback 链 ──────────────────────────────────────────
     if symbol.startswith('SECTOR:'):
