@@ -12,6 +12,14 @@ fi
 
 PORT=8501
 
+# 启动前自测门禁（离线、约 2 秒；失败仅告警，不阻断启动）
+echo "运行离线自测验证（数据层 + 核心功能）..."
+if /usr/bin/python3 run_selfcheck.py >/dev/null 2>&1; then
+    echo "自测通过：数据层与核心功能正确性已验证。"
+else
+    echo "[警告] 自测未完全通过，请运行 python3 run_selfcheck.py 查看详情。"
+fi
+
 # 关掉旧实例
 OLD_PID=$(lsof -i :$PORT -sTCP:LISTEN -t 2>/dev/null | head -1)
 if [ -n "$OLD_PID" ]; then

@@ -76,14 +76,15 @@ def score_headline(headline: str) -> int:
     return score
 
 
-def parse_events_from_search(results: list, keyword: str) -> list[tuple[str, int, str]]:
+def parse_events_from_search(results: list, keyword: str) -> list[tuple[str, int, str, str]]:
     """
     将 web_search 返回的原始结果解析为情绪事件列表。
 
-    results: web_search 返回的 list，每项含 title/snippet/date 等
+    results: web_search 返回的 list，每项含 title/snippet/date/url 等
     keyword: 搜索关键词（用于推断日期）
 
-    返回: [(日期, 分数, 标题), ...]
+    返回: [(日期, 分数, 标题, url), ...]
+        —— 第四元素 url 默认空串；渲染层据此决定是否可点击跳转。
     """
     events = []
     now = datetime.now()
@@ -92,6 +93,7 @@ def parse_events_from_search(results: list, keyword: str) -> list[tuple[str, int
     for item in results:
         title = item.get("title", "")
         snippet = item.get("snippet", item.get("description", ""))
+        url = item.get("url", "") or ""
         combined = f"{title} {snippet}"
         score = score_headline(combined)
 
@@ -108,7 +110,7 @@ def parse_events_from_search(results: list, keyword: str) -> list[tuple[str, int
                 date_str = default_date
 
         if score != 0:  # 跳过无情感倾向的新闻
-            events.append((date_str, score, title))
+            events.append((date_str, score, title, url))
 
     events.sort(key=lambda x: x[0])
     return events
@@ -341,7 +343,7 @@ def search_and_parse_events(
     sector: str = None,
     max_per_query: int = 6,
     code: str = None,
-) -> list[tuple[str, int, str]]:
+) -> list[tuple[str, int, str, str]]:
     """
     使用多组关键词并行搜索、解析、去重，返回情绪事件列表。
 
@@ -352,7 +354,8 @@ def search_and_parse_events(
     code:     可选，标的代码（如 '600519.SH'）。若提供，优先用代码走 akshare
               个股新闻通道（强相关），其余维度用名称/板块词走的 web 通道。
 
-    返回: [(date_str, score, title), ...]
+    返回: [(date_str, score, title, url), ...]
+        —— 第四元素 url 默认空串；渲染层据此决定是否可点击跳转。
 
     流程:
     1. 生成多组「总结性」搜索关键词（标的 / 板块 / 概念题材 / 行业视角 / 大V）
@@ -427,7 +430,7 @@ def search_and_parse_events(
     return all_events
 
 def get_sentiment_for_date(
-    events: list[tuple[str, int, str]],
+    events: list,
     target_date: str,
     window_days: int = 7,
 ) -> tuple[float, list[str]]:
@@ -437,6 +440,9 @@ def get_sentiment_for_date(
     返回: (加权分数, [相关新闻标题列表])
 
     权重: 当天=1.0, 线性衰减到 window_days 天=0.3
+
+    兼容事件格式：3 元组 (date, score, title) 或 4 元组
+    (date, score, title, url)。仅取前三个字段参与计算，url 忽略。
     """
     try:
         target = datetime.strptime(target_date[:10], "%Y-%m-%d")
@@ -445,7 +451,11 @@ def get_sentiment_for_date(
 
     relevant = []
     total_score = 0.0
-    for date_str, score, title in events:
+    for ev in events:
+        # 兼容 3/4 元组，避免调用方混用不同格式时解包崩溃
+        if not isinstance(ev, (list, tuple)) or len(ev) < 3:
+            continue
+        date_str, score, title = ev[0], ev[1], ev[2]
         try:
             event_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
         except (ValueError, TypeError):
@@ -534,17 +544,20 @@ def summarize_news(raw_news: list[dict]) -> str:
         return f"{tag}情绪（抓取{len(raw_news)}条新闻）"
 
 
-def summarize_news_by_events(events: list[tuple[str, int, str]]) -> str:
+def summarize_news_by_events(events: list) -> str:
     """
-    从已解析的情绪事件列表 [(date, score, title), ...] 生成一句情绪摘要。
-    与 summarize_news 区别在于输入已经是事件而非原始新闻 dict。
+    从已解析的情绪事件列表 [(date, score, title) 或 (date, score, title, url), ...]
+    生成一句情绪摘要。与 summarize_news 区别在于输入已经是事件而非原始新闻 dict。
+    兼容 3 / 4 元组（忽略 url 字段）。
     """
     if not events:
         return "暂无市场情绪数据"
 
-    total = sum(score for _, score, _ in events)
-    positive = [t for _, s, t in events if s > 0]
-    negative = [t for _, s, t in events if s < 0]
+    # 兼容 3/4 元组：用索引取前三个字段
+    _evs = [ev for ev in events if isinstance(ev, (list, tuple)) and len(ev) >= 3]
+    total = sum(ev[1] for ev in _evs)
+    positive = [ev[2] for ev in _evs if ev[1] > 0]
+    negative = [ev[2] for ev in _evs if ev[1] < 0]
 
     if total > 3:
         tag = "利好"

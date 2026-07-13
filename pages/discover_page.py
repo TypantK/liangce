@@ -168,7 +168,13 @@ ASSET_CATEGORY = {
 # 每项结构：(展示名, 抓取代码, 资产类型)
 #   - 股票/板块/加密直接走 get_stock_data（板块代码形如 SECTOR:白酒）
 #   - 基金走 get_fund_nav -> fund_nav_to_ohlcv
-DISCOVER_POOL = list(STOCK_POOL.items()) + [
+# STOCK_POOL 是 {名称: 代码} 的 2 元组映射，这里统一补上资产类型，
+# 与下方板块/基金合并成统一的 (名称, 代码, 类型) 三元组池。
+_DISCOVER_STOCK_ITEMS = [
+    (name, code, _classify_symbol(code)) for name, code in STOCK_POOL.items()
+]
+
+DISCOVER_POOL = _DISCOVER_STOCK_ITEMS + [
     # —— 板块指数（申万/同花顺行业）——
     ("白酒板块",     "SECTOR:白酒",        "板块"),
     ("半导体板块",   "SECTOR:半导体",      "板块"),

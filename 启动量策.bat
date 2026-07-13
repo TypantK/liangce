@@ -23,6 +23,15 @@ REM 检查 streamlit 是否可用
     %PY% -m pip install -r requirements.txt
 )
 
+REM 启动前自测门禁（离线、约 2 秒；失败仅告警，不阻断启动）
+echo [量策] 正在运行离线自测验证（数据层 + 核心功能）...
+%PY% run_selfcheck.py >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [量策] 自测通过：数据层与核心功能正确性已验证。
+) else (
+    echo [量策][警告] 自测未完全通过，请运行 python run_selfcheck.py 查看详情。
+)
+
 echo [量策] 正在启动服务 (http://localhost:%PORT%)...
 start "" http://localhost:%PORT%
 %PY% -m streamlit run app.py --server.port %PORT% --server.headless true --browser.gatherUsageStats false

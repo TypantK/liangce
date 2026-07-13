@@ -34,3 +34,7 @@ data_cache/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+
+# 错误日志收集（运行时自动生成；由 utils/error_collector.py 维护）
+data/error_logs/
+data/errors.db*

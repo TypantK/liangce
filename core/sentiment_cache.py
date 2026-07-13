@@ -138,15 +138,19 @@ def _rows_to_events(rows: List[dict]) -> List[Tuple[str, int, str]]:
     return events
 
 
-def _events_to_records(events: List[Tuple[str, int, str]],
+def _events_to_records(events: List,
                        symbol: Optional[str],
                        sector: Optional[str]) -> List[dict]:
-    """把 [(date, score, title), ...] 事件元组转成可入库的 dict 列表。"""
+    """把 [(date, score, title) 或 (date, score, title, url), ...] 事件元组转成可入库的 dict 列表。兼容 3/4 元组。"""
     from core.sentiment import format_sentiment_tag
     records = []
-    for date_str, score, title in events:
+    for ev in events:
+        if not isinstance(ev, (list, tuple)) or len(ev) < 3:
+            continue
+        date_str, score, title = ev[0], ev[1], ev[2]
         if not title:
             continue
+        url = ev[3] if len(ev) >= 4 else None
         records.append({
             "date": date_str,
             "symbol": symbol,
@@ -156,7 +160,7 @@ def _events_to_records(events: List[Tuple[str, int, str]],
             "sentiment": format_sentiment_tag(score),
             "score": int(score),
             "source": "cache",
-            "url": None,
+            "url": url,
         })
     return records
 

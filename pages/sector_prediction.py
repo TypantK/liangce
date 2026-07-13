@@ -608,36 +608,9 @@ def render():
             f"抓取 {len(_scored_news)} 条，消息面综合情绪："
             f"**{_news_tag}**（{_news_score_sum:+}）｜ 国内社交 + 海外资讯多通道"
         )
-        # 两列卡片展示
-        _ncols = st.columns(2)
-        for _i, _item in enumerate(_scored_news):
-            with _ncols[_i % 2]:
-                if _item["score"] > 0:
-                    _badge_bg, _badge_tx, _badge = "#2e7d32", "#ffffff", f"利好 +{_item['score']}"
-                elif _item["score"] < 0:
-                    _badge_bg, _badge_tx, _badge = "#c62828", "#ffffff", f"利空 {_item['score']}"
-                else:
-                    _badge_bg, _badge_tx, _badge = "#6b7280", "#ffffff", "中性"
-                _title_html = (_item["title"] or "（无标题）")
-                if _item["url"]:
-                    _title_html = f'<a href="{_item["url"]}" target="_blank" style="color:inherit;text-decoration:none">{_title_html}</a>'
-                st.markdown(
-                    f"""
-                    <div style="border-left:4px solid {_badge_bg};background:
-                        {'rgba(46,125,50,0.08)' if _item['score']>0 else ('rgba(198,40,40,0.08)' if _item['score']<0 else 'rgba(107,114,128,0.08)')};
-                        padding:8px 12px;border-radius:6px;margin:4px 0;font-size:13px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-                            <span style="font-weight:600;color:#c8cce0">{_title_html}</span>
-                            <span style="background:{_badge_bg};color:{_badge_tx};
-                                padding:1px 8px;border-radius:4px;font-size:11px;white-space:nowrap">{_badge}</span>
-                        </div>
-                        <div style="font-size:11px;color:#6b7094;margin-top:2px">
-                            {_item['region']} · {_item['source']}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+        # 统一新闻渲染（标题可点击跳转，利好/利空徽章）
+        from core.news_render import render_news_cards
+        render_news_cards(_scored_news, theme=st.session_state.get("_theme_mode", "dark"))
         # 消息面对情景概率的影响提示
         if _news_score_sum > 0:
             _news_hint = f"消息面偏多（综合 {_news_score_sum:+}），利好事件密集，**直接突破**情景概率有望上修，**趋势转弱**概率下修。"
