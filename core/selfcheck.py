@@ -237,8 +237,9 @@ class TestSentimentScoring(unittest.TestCase):
             {"title": "今日天气晴", "snippet": "无关新闻", "date": "2024-01-02"},
         ]
         events = sentiment_mod.parse_events_from_search(results, "测试")
-        # 中性新闻（score==0）应被跳过
-        self.assertTrue(all(s != 0 for _, s, _ in events))
+        # 中性新闻（score==0）应被跳过；事件为 (date, score, title[, url]) 兼容 3/4 元组
+        self.assertTrue(all(ev[1] != 0 for ev in events
+                            if isinstance(ev, (list, tuple)) and len(ev) >= 3))
         self.assertEqual(len(events), 1)
 
     def test_parse_events_date_extraction(self):

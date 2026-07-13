@@ -854,27 +854,7 @@ def _render_fund(item, theme):
         if sentiment_events:
             day_events = [e for e in sentiment_events if e[0] == clicked_date]
             if day_events:
-                for _ev in day_events:
-                    if not isinstance(_ev, (list, tuple)) or len(_ev) < 3:
-                        continue
-                    _date_str, _score, _title = _ev[0], _ev[1], _ev[2]
-                    if _score > 0:
-                        st.markdown(
-                            f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
-                            f'border-left:4px solid #2e7d32">'
-                            f'📈 <b>利好</b> (+{_score}) &nbsp; {_title}</div>',
-                            unsafe_allow_html=True)
-                    elif _score < 0:
-                        st.markdown(
-                            f'<div style="background:#ffebee;padding:8px 12px;border-radius:6px;margin:4px 0;'
-                            f'border-left:4px solid #c62828">'
-                            f'📉 <b>利空</b> ({_score}) &nbsp; {_title}</div>',
-                            unsafe_allow_html=True)
-                    else:
-                        st.markdown(
-                            f'<div style="color:#888;padding:4px 12px;margin:2px 0">'
-                            f'➖ 中性 &nbsp; {_title}</div>',
-                            unsafe_allow_html=True)
+                render_news_list(day_events, theme=theme)
             else:
                 st.info("当日无相关新闻")
         else:
@@ -1026,27 +1006,7 @@ def _render_backtest(item, theme):
         if sentiment_events:
             day_events = [e for e in sentiment_events if e[0] == clicked_date]
             if day_events:
-                for _ev in day_events:
-                    if not isinstance(_ev, (list, tuple)) or len(_ev) < 3:
-                        continue
-                    _date_str, _score, _title = _ev[0], _ev[1], _ev[2]
-                    if _score > 0:
-                        st.markdown(
-                            f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
-                            f'border-left:4px solid #2e7d32">'
-                            f'📈 <b>利好</b> (+{_score}) &nbsp; {_title}</div>',
-                            unsafe_allow_html=True)
-                    elif _score < 0:
-                        st.markdown(
-                            f'<div style="background:#ffebee;padding:8px 12px;border-radius:6px;margin:4px 0;'
-                            f'border-left:4px solid #c62828">'
-                            f'📉 <b>利空</b> ({_score}) &nbsp; {_title}</div>',
-                            unsafe_allow_html=True)
-                    else:
-                        st.markdown(
-                            f'<div style="color:#888;padding:4px 12px;margin:2px 0">'
-                            f'➖ 中性 &nbsp; {_title}</div>',
-                            unsafe_allow_html=True)
+                render_news_list(day_events, theme=theme)
             else:
                 st.info("当日无相关新闻")
         else:

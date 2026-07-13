@@ -72,9 +72,17 @@ def _badge(score: int):
     return "#6b7280", "#ffffff", "中性"
 
 
+def _theme_colors(theme: str):
+    """返回 (标题文字色, 元信息文字色)，跟随主题。"""
+    if theme == "light":
+        return "#1f2937", "#6b7280"
+    return "#c8cce0", "#6b7094"
+
+
 def _row_html(n: Dict[str, Any], theme: str = "dark") -> str:
-    """渲染单条新闻为 HTML（带可点击标题）。"""
+    """渲染单条新闻为 HTML（带可点击标题），文字色跟随主题。"""
     bg_badge, tx_badge, badge = _badge(n["score"])
+    fg_title, fg_meta = _theme_colors(theme)
     title_text = n["title"] or "（无标题）"
     # 有 url 才套链接，否则纯文本（避免空链接）
     if n["url"]:
@@ -90,16 +98,18 @@ def _row_html(n: Dict[str, Any], theme: str = "dark") -> str:
                               n["region"] or "", n["source"] or "") if p]
     meta = " · ".join(meta_parts)
 
+    box_bg = ('rgba(46,125,50,0.08)' if n['score'] > 0
+              else ('rgba(198,40,40,0.08)' if n['score'] < 0 else 'rgba(107,114,128,0.08)'))
+
     return f"""
-    <div style="border-left:4px solid {bg_badge};background:
-        {'rgba(46,125,50,0.08)' if n['score']>0 else ('rgba(198,40,40,0.08)' if n['score']<0 else 'rgba(107,114,128,0.08)')};
+    <div style="border-left:4px solid {bg_badge};background:{box_bg};
         padding:8px 12px;border-radius:6px;margin:4px 0;font-size:13px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-            <span style="font-weight:600;color:#c8cce0">{title_html}</span>
+            <span style="font-weight:600;color:{fg_title}">{title_html}</span>
             <span style="background:{bg_badge};color:{tx_badge};
                 padding:1px 8px;border-radius:4px;font-size:11px;white-space:nowrap">{badge}</span>
         </div>
-        <div style="font-size:11px;color:#6b7094;margin-top:2px">{meta}</div>
+        <div style="font-size:11px;color:{fg_meta};margin-top:2px">{meta}</div>
     </div>
     """
 
@@ -136,18 +146,19 @@ def render_news_list(items: List[NewsItem], theme: str = "dark"):
         st.caption("当日无相关资讯")
         return
 
+    fg_title, fg_meta = _theme_colors(theme)
     norm = [_normalize(it) for it in items]
     for n in norm:
         if n["score"] > 0:
-            box = (f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
-                   f'border-left:4px solid #2e7d32">📈 <b>利好</b> (+{n["score"]}) &nbsp; '
-                   f'{_link_or_text(n)}</div>')
+            box = (f'<div style="background:rgba(46,125,50,0.10);padding:8px 12px;border-radius:6px;'
+                   f'margin:4px 0;border-left:4px solid #2e7d32;color:{fg_title}">'
+                   f'📈 <b>利好</b> (+{n["score"]}) &nbsp; {_link_or_text(n)}</div>')
         elif n["score"] < 0:
-            box = (f'<div style="background:#ffebee;padding:8px 12px;border-radius:6px;margin:4px 0;'
-                   f'border-left:4px solid #c62828">📉 <b>利空</b> ({n["score"]}) &nbsp; '
-                   f'{_link_or_text(n)}</div>')
+            box = (f'<div style="background:rgba(198,40,40,0.10);padding:8px 12px;border-radius:6px;'
+                   f'margin:4px 0;border-left:4px solid #c62828;color:{fg_title}">'
+                   f'📉 <b>利空</b> ({n["score"]}) &nbsp; {_link_or_text(n)}</div>')
         else:
-            box = (f'<div style="color:#888;padding:4px 12px;margin:2px 0">'
+            box = (f'<div style="color:{fg_meta};padding:4px 12px;margin:2px 0">'
                    f'➖ 中性 &nbsp; {_link_or_text(n)}</div>')
         st.markdown(box, unsafe_allow_html=True)
 

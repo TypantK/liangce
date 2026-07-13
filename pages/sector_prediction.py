@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 from core.data_fetcher import STOCK_POOL, get_stock_data
 from utils.chart import (UP_GREEN, DN_RED, CN_FONT,
                         build_enhanced_chart_html, inject_hotkey_bridge_once)
+from utils.table_render import render_table
 from core.sentiment_fetcher import fetch_news
 from core.sentiment import score_headline, format_sentiment_tag
 
@@ -303,19 +304,21 @@ def _generate_paths(df, n_days=60):
 def _plot_prediction(df, future_dates, bull_ohlc, base_ohlc, bear_ohlc, tech, theme="dark"):
     """绘制历史K线 + 三种预测路径的交互式图表"""
 
+    # 主题配色统一复用 utils.chart 常量，避免多处平行拷贝
+    from utils import chart as _c
     if theme == "light":
-        _bg = '#ffffff'
+        _bg = _c.LIGHT_BG
         _grid_h = 'rgba(229,231,235,0.35)'
-        _fg = '#1f2937'
-        _fg_soft = '#6b7280'
-        _line_c = '#d1d5db'
+        _fg = _c.LIGHT_FG
+        _fg_soft = _c.LIGHT_FG_SOFT
+        _line_c = _c.LIGHT_LINE_C
         _template = 'plotly_white'
         _legend_bg = 'rgba(243,244,246,0.92)'
     else:
-        _bg = '#131520'
+        _bg = _c.BG
         _grid_h = 'rgba(31,35,53,0.30)'
-        _fg = '#c8cce0'
-        _fg_soft = '#6b7094'
+        _fg = _c.FG
+        _fg_soft = _c.FG_SOFT
         _line_c = '#2a2d3e'
         _template = 'plotly_dark'
         _legend_bg = 'rgba(26,29,46,0.92)'
@@ -650,35 +653,8 @@ def render():
     ]
     prob_df = pd.DataFrame(prob_data)
 
-    # 自定义样式表格
-    if theme == 'dark':
-        st.markdown(
-            prob_df.to_html(
-                index=False, escape=False,
-                classes='prediction-table',
-            ).replace(
-                '<table', '<table style="width:100%;border-collapse:collapse;font-family:PingFang SC,Microsoft YaHei,sans-serif;font-size:14px;"'
-            ).replace(
-                '<th', '<th style="background:#1a1d2e;color:#c8cce0;padding:12px 16px;text-align:left;border-bottom:2px solid #2a2d3e;font-weight:600;"'
-            ).replace(
-                '<td', '<td style="color:#c8cce0;padding:10px 16px;border-bottom:1px solid #2a2d3e;"'
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            prob_df.to_html(
-                index=False, escape=False,
-                classes='prediction-table',
-            ).replace(
-                '<table', '<table style="width:100%;border-collapse:collapse;font-family:PingFang SC,Microsoft YaHei,sans-serif;font-size:14px;"'
-            ).replace(
-                '<th', '<th style="background:#f3f4f6;color:#1f2937;padding:12px 16px;text-align:left;border-bottom:2px solid #e5e7eb;font-weight:600;"'
-            ).replace(
-                '<td', '<td style="color:#1f2937;padding:10px 16px;border-bottom:1px solid #e5e7eb;"'
-            ),
-            unsafe_allow_html=True,
-        )
+    # 统一表格渲染（自动适配主题）
+    render_table(prob_df, theme=theme)
 
     # ========== 分析文字 ==========
     st.markdown('---')
@@ -736,28 +712,8 @@ def render():
     key_levels.append({'类型': '预测低点（转弱）', '价位': f'{price_unit}{bear_ohlc["close"].iloc[-1]:.2f}', '意义': f'{predict_days}日后趋势转弱情景'})
 
     key_df = pd.DataFrame(key_levels)
-    if theme == 'dark':
-        st.markdown(
-            key_df.to_html(index=False, escape=False).replace(
-                '<table', '<table style="width:100%;border-collapse:collapse;font-family:PingFang SC,Microsoft YaHei,sans-serif;font-size:14px;"'
-            ).replace(
-                '<th', '<th style="background:#1a1d2e;color:#c8cce0;padding:12px 16px;text-align:left;border-bottom:2px solid #2a2d3e;font-weight:600;"'
-            ).replace(
-                '<td', '<td style="color:#c8cce0;padding:10px 16px;border-bottom:1px solid #2a2d3e;"'
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            key_df.to_html(index=False, escape=False).replace(
-                '<table', '<table style="width:100%;border-collapse:collapse;font-family:PingFang SC,Microsoft YaHei,sans-serif;font-size:14px;"'
-            ).replace(
-                '<th', '<th style="background:#f3f4f6;color:#1f2937;padding:12px 16px;text-align:left;border-bottom:2px solid #e5e7eb;font-weight:600;"'
-            ).replace(
-                '<td', '<td style="color:#1f2937;padding:10px 16px;border-bottom:1px solid #e5e7eb;"'
-            ),
-            unsafe_allow_html=True,
-        )
+    # 统一表格渲染（自动适配主题）
+    render_table(key_df, theme=theme)
 
     st.caption('⚠️ 以上推演基于历史数据与技术指标，不构成投资建议。市场走势受多重因素影响，请结合基本面与宏观环境独立判断。')
 
