@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""
-每日市场复盘数据层 (daily_review)
-============================================================
-方法论借鉴自 quantskills/skill-market-daily-review（仅参考「章节→数据」的
-组织结构与「事实/推断分离、优雅降级不估数」原则），**代码完全自研**，
-数据源使用本项目已有的免费通道（akshare + core.em_client 东财直连），
-不引入 Pandadata、不拷贝其任何代码，规避 GPL-3.0 传染。
+# 本文件属于「量策 / liangce」项目，以 GNU GPL v3.0 发布。
+# Copyright (C) 2026  TypantK
+#
+# 每日市场复盘数据层 (daily_review)
+# ============================================================
+# 方法论借鉴自 quantskills/skill-market-daily-review（GPL-3.0）。本项目同样以
+# GPL-3.0 发布，故可依据该许可证合法复用其「章节→数据」组织结构与「事实/推断
+# 分离、优雅降级不估数」原则；**代码完全自研**，数据源使用本项目已有的免费通道
+# （akshare + core.em_client 东财直连），不引入 Pandadata、不拷贝其任何代码。
 
+"""
 产出一个结构化 dict，交由 discover_page 渲染。每个字段都标注：
   - value：事实数据（取不到则为 None，绝不估算/编造）
   - as_of：数据对应交易日（T+1 复盘：盘后数据对应「上一交易日」）
@@ -230,12 +233,21 @@ def build_daily_review() -> Dict[str, Any]:
     """
     now = datetime.now()
     # T+1 复盘：盘后（15:00 后）对应今日；盘中/盘前对应「最近已收盘交易日」提示由 UI 呈现
-    return {
+    review = {
         "as_of": _today_str(),
         "generated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
         "is_after_close": (now.hour > 15) or (now.hour == 15 and now.minute >= 0),
+        "disclaimer": "本复盘仅客观陈述市场数据，不构成任何投资建议（只述不荐）",
         "indices": fetch_indices(),
         "breadth": fetch_breadth(),
         "sectors": fetch_sectors(),
         "capital": fetch_capital(),
     }
+    # 交付前 Quality Gate（借鉴 skill-market-daily-review 的 validate_report 思路）：
+    # 校验结果仅作为提示/日志，不阻断渲染；数据缺失已各自优雅降级为占位。
+    try:
+        from .daily_review_validate import validate_daily_review
+        review["_validation"] = validate_daily_review(review)
+    except Exception:
+        review["_validation"] = None
+    return review

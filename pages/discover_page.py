@@ -58,6 +58,18 @@ def _render_daily_review(theme):
             "　—　本页仅客观陈述市场数据，不构成任何投资建议（只述不荐）"
         )
 
+        # ---- 交付前校验门禁（借鉴 daily-review 的 validate_report 思路）----
+        _val = review.get("_validation")
+        if isinstance(_val, dict):
+            if _val.get("ok"):
+                if _val.get("warnings"):
+                    st.caption("⚠️ 复盘数据已就绪，部分章节口径提示：" +
+                               "；".join(_val["warnings"]))
+            else:
+                st.error("复盘数据校验未通过：" + "；".join(_val.get("errors", [])))
+        elif _val is not None:
+            st.caption("复盘数据校验结果不可用")
+
         # ---- 1. 指数概览 ----
         st.markdown("**① 指数概览**")
         idx = review.get("indices", {})
