@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import backtrader as bt
 
 from core.strategies import STRATEGY_REGISTRY
-from core.data_fetcher import STOCK_POOL, get_stock_data
+from core.data_fetcher import STOCK_POOL, get_stock_data, get_fund_nav, fund_nav_to_ohlcv
 from core.engine import _make_logged_strategy
 
 
@@ -21,8 +21,44 @@ from core.engine import _make_logged_strategy
 #  辅助函数
 # ============================================================
 
-def _classify_symbol(code):
-    """按代码后缀分类标的类型"""
+# 资产大类 → 市场筛选下拉项
+ASSET_CATEGORY = {
+    'A股': 'A股',
+    '美股': '美股',
+    '加密货币': '加密货币',
+    '板块': '板块指数',
+    '基金': '基金',
+}
+
+# 发现页扩展标的池：除固定股票外，额外纳入板块指数与基金。
+# 每项结构：(展示名, 抓取代码, 资产类型)
+#   - 股票/板块/加密直接走 get_stock_data（板块代码形如 SECTOR:白酒）
+#   - 基金走 get_fund_nav -> fund_nav_to_ohlcv
+DISCOVER_POOL = list(STOCK_POOL.items()) + [
+    # —— 板块指数（申万/同花顺行业）——
+    ("白酒板块",     "SECTOR:白酒",        "板块"),
+    ("半导体板块",   "SECTOR:半导体",      "板块"),
+    ("新能源汽车板块", "SECTOR:新能源汽车",  "板块"),
+    ("光伏设备板块",  "SECTOR:光伏设备",    "板块"),
+    ("医药生物板块",  "SECTOR:医药生物",    "板块"),
+    ("银行板块",     "SECTOR:银行",        "板块"),
+    ("军工板块",     "SECTOR:军工",        "板块"),
+    # —— 基金（常见 ETF / 主动基金）——
+    ("沪深300ETF",   "510300",            "基金"),
+    ("科创50ETF",    "588000",            "基金"),
+    ("中概互联网ETF", "513050",            "基金"),
+    ("纳指ETF",      "513100",            "基金"),
+    ("招商中证白酒",  "161725",            "基金"),
+    ("易方达蓝筹",    "005827",            "基金"),
+]
+
+
+def _classify_symbol(code, asset_type=None):
+    """按资产类型分类标的（优先使用 pool 中声明的类型，避免代码后缀误判）"""
+    if asset_type in ASSET_CATEGORY:
+        return ASSET_CATEGORY[asset_type]
+    if code.startswith('SECTOR:'):
+        return '板块指数'
     if code.endswith(('.SZ', '.SH')):
         return 'A股'
     elif 'USDT' in code:
@@ -32,11 +68,17 @@ def _classify_symbol(code):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _fetch_data_cached(symbol_code):
+def _fetch_data_cached(symbol_code, asset_type='stock'):
     """获取最近 90 个交易日的数据（带 1 小时缓存）"""
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=150)).strftime('%Y-%m-%d')
-    df = get_stock_data(symbol_code, start=start, end=end)
+    if asset_type == '基金':
+        nav = get_fund_nav(symbol_code, start=start, end=end)
+        if nav is None or nav.empty:
+            return None
+        df = fund_nav_to_ohlcv(nav)
+    else:
+        df = get_stock_data(symbol_code, start=start, end=end)
     if df is None or df.empty:
         return None
     # 只保留最近 90 行
@@ -44,12 +86,12 @@ def _fetch_data_cached(symbol_code):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name):
+def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name, asset_type='stock'):
     """
     对单个（标的, 策略）对运行回测，提取信号。
     返回 dict 或 None（数据/回测失败）。
     """
-    data = _fetch_data_cached(symbol_code)
+    data = _fetch_data_cached(symbol_code, asset_type)
     if data is None:
         return None
 
@@ -125,7 +167,7 @@ def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name):
             'signal_date': signal_date,
             'signal_desc': signal_desc,
             'recent_price': recent_price,
-            'category': _classify_symbol(symbol_code),
+            'category': _classify_symbol(symbol_code, asset_type),
         }
     except Exception as e:
         return {
@@ -135,7 +177,7 @@ def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name):
             'signal_date': '',
             'signal_desc': str(e)[:120],
             'recent_price': 0,
-            'category': _classify_symbol(symbol_code),
+            'category': _classify_symbol(symbol_code, asset_type),
         }
 
 
@@ -226,6 +268,9 @@ def _render_card(result, theme):
             <span>策略：{strategy_str}</span>
             <span>价格：{price_str} ｜ 信号日：{result['signal_date']}</span>
         </div>
+        <div style="font-size:11px;color:{'#6b7094' if theme == 'dark' else '#9e9e9e'};margin-top:2px">
+            类型：{result.get('category', '—')}
+        </div>
     </div>"""
 
 
@@ -291,12 +336,12 @@ def _continue_scan():
     sym_name, sym_code, sym_cat = pool[cursor]
 
     # 检查数据是否可用
-    has_data = _fetch_data_cached(sym_code)
+    has_data = _fetch_data_cached(sym_code, sym_cat)
     if has_data is None:
         st.session_state._ds_failed.append(sym_name)
     else:
         for strat_name in strategies:
-            res = _scan_symbol_strategy(sym_name, sym_code, strat_name)
+            res = _scan_symbol_strategy(sym_name, sym_code, strat_name, sym_cat)
             if res is not None:
                 st.session_state._ds_results.append(res)
 
@@ -431,10 +476,10 @@ def render():
     col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
-        market_options = ["全部市场", "A股", "美股", "加密货币"]
+        market_options = ["全部市场", "A股", "美股", "加密货币", "板块指数", "基金"]
         selected_market = st.selectbox(
             "市场", market_options, index=0,
-            help="筛选要扫描的标的所在市场",
+            help="筛选要扫描的标的类型：股票（A股/美股/加密货币）、行业板块指数、或基金",
             disabled=st.session_state._ds_running
         )
     with col2:
@@ -464,10 +509,10 @@ def render():
     # 情况 2：用户点击扫描按钮
     if scan_btn:
         pool_items = []
-        for name, code in STOCK_POOL.items():
-            cat = _classify_symbol(code)
+        for name, code, atype in DISCOVER_POOL:
+            cat = _classify_symbol(code, atype)
             if selected_market == "全部市场" or cat == selected_market:
-                pool_items.append((name, code, cat))
+                pool_items.append((name, code, atype))
 
         if not pool_items:
             st.warning("没有符合条件的标的")
