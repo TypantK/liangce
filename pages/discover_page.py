@@ -15,6 +15,7 @@ import backtrader as bt
 from core.strategies import STRATEGY_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, get_fund_nav, fund_nav_to_ohlcv
 from core.engine import _make_logged_strategy
+from core import insight as insight_module
 
 
 # ============================================================
@@ -216,6 +217,12 @@ def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name, asset_type='s
     if data is None:
         return None
 
+    # 规则之外的「智能洞察」层（量价/估值/相对强弱/情绪/板块联动）
+    try:
+        _insight = insight_module.build_insight(symbol_name, symbol_code, asset_type)
+    except Exception:
+        _insight = {}
+
     strat_info = STRATEGY_REGISTRY[strategy_name]
     default_params = {pn: prange[2] for pn, prange in strat_info["params"].items()}
 
@@ -289,6 +296,7 @@ def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name, asset_type='s
             'signal_desc': signal_desc,
             'recent_price': recent_price,
             'category': _classify_symbol(symbol_code, asset_type),
+            '_insight': _insight,
         }
     except Exception as e:
         return {
@@ -299,6 +307,7 @@ def _scan_symbol_strategy(symbol_name, symbol_code, strategy_name, asset_type='s
             'signal_desc': str(e)[:120],
             'recent_price': 0,
             'category': _classify_symbol(symbol_code, asset_type),
+            '_insight': {},
         }
 
 
@@ -360,6 +369,23 @@ def _render_card(result, theme):
     else:
         reason_str = unique_reasons[0] if unique_reasons else result.get('signal_desc', '')
 
+    # 规则之外的「智能洞察」行（量价/估值/相对强弱/情绪/板块联动）
+    insight = result.get('_insight') or {}
+    insight_tags = insight_module.summarize_insight(insight) if insight else []
+    if insight_tags:
+        chips = "".join(
+            f"<span style='display:inline-block;background:{'#2a2f55' if theme=='dark' else '#eef1fb'};"
+            f"color:{'#aeb8ff' if theme=='dark' else '#3a47c2'};"
+            f"padding:2px 8px;border-radius:10px;font-size:10px;margin:2px 4px 2px 0'>"
+            f"{t}</span>"
+            for t in insight_tags
+        )
+        insight_html = (
+            f"<div style='margin:6px 0 4px;line-height:1.6'>{chips}</div>"
+        )
+    else:
+        insight_html = ""
+
     return f"""
     <div style="
         background:{bg};
@@ -385,6 +411,7 @@ def _render_card(result, theme):
         <div style="font-size:13px;color:{desc_color};margin-bottom:4px">
             {reason_str}
         </div>
+        {insight_html}
         <div style="display:flex;justify-content:space-between;font-size:11px;color:{'#6b7094' if theme == 'dark' else '#9e9e9e'}">
             <span>策略：{strategy_str}</span>
             <span>价格：{price_str} ｜ 信号日：{result['signal_date']}</span>
@@ -503,6 +530,8 @@ def _dedupe_by_symbol(results):
             merged[sym] = dict(r)  # 浅拷贝
             merged[sym]['_hit_strategies'] = [r['strategy']]
             merged[sym]['_all_reasons'] = [r['signal_desc']]
+            # 取第一个非空的洞察作为该标的洞察
+            merged[sym]['_insight'] = r.get('_insight') or {}
             continue
         exist = merged[sym]
         exist['_hit_strategies'].append(r['strategy'])
@@ -511,7 +540,64 @@ def _dedupe_by_symbol(results):
         if _SIGNAL_PRIORITY.get(r['signal'], 99) < _SIGNAL_PRIORITY.get(exist['signal'], 99):
             for k in ('signal', 'signal_date', 'signal_desc', 'recent_price', 'category'):
                 exist[k] = r[k]
+        # 若主记录洞察为空且当前有洞察，补上
+        if not exist.get('_insight') and r.get('_insight'):
+            exist['_insight'] = r['_insight']
     return list(merged.values())
+
+
+def _render_insight_brief(filtered, theme):
+    """智能洞察线索汇总：从所有信号标的里提炼「规则外」的重点线索。
+
+    仅提示有正向/值得关注意义的维度（放量、低位、跑赢大盘、新闻偏多），
+    不重复策略信号本身。取不到数据的维度不显示。
+    """
+    clues = []  # (标的, 维度, 文案)
+    for r in filtered:
+        ins = r.get('_insight') or {}
+        name = r['symbol']
+        # 放量
+        vol = ins.get('volume') or {}
+        if vol.get('value') is not None and vol['value'] >= 1.3:
+            clues.append((name, "量价", vol['label']))
+        # 低位
+        val = ins.get('valuation') or {}
+        if val.get('value') is not None and val['value'] <= 0.2:
+            clues.append((name, "估值", val['label']))
+        # 跑赢大盘
+        rs = ins.get('relative_strength') or {}
+        if rs.get('value') is not None and rs['value'] >= 0:
+            clues.append((name, "强弱", rs['label']))
+        # 新闻偏多
+        sent = ins.get('sentiment') or {}
+        if sent.get('value') is not None and sent['value'] >= 0.5:
+            clues.append((name, "情绪", sent['label']))
+        # 板块上涨（个股板块联动）
+        sec = ins.get('sector') or {}
+        if sec.get('value') is not None and sec['value'] > 0:
+            clues.append((name, "板块", sec['label']))
+
+    if not clues:
+        return
+
+    with st.expander("💡 智能洞察线索（规则之外的辅助关注，点击展开）", expanded=True):
+        st.caption(
+            "以下线索由「量价/估值/相对强弱/新闻情绪/板块联动」五个维度综合得出，"
+            "不依赖固定策略规则，仅供辅助参考，不构成投资建议。"
+        )
+        # 按标的分组展示
+        from collections import OrderedDict
+        grouped = OrderedDict()
+        for name, dim, text in clues:
+            grouped.setdefault(name, []).append((dim, text))
+        for name, items in grouped.items():
+            line = "　".join(f"【{d}】{t}" for d, t in items)
+            st.markdown(
+                f"<div style='font-size:12px;margin:3px 0'>"
+                f"<b style='color:{'#a5d6a7' if theme=='dark' else '#1b5e20'}'>{name}</b>：{line}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def _show_results(theme):
@@ -539,6 +625,9 @@ def _show_results(theme):
         if failed_symbols:
             st.caption(f"数据获取失败: {', '.join(failed_symbols)}")
         return
+
+    # ---- 智能洞察线索汇总（规则之外，顶部重点提示）----
+    _render_insight_brief(filtered, theme)
 
     buy_signals = [r for r in filtered if r['signal'] == '买入信号']
     sell_signals = [r for r in filtered if r['signal'] == '卖出信号']
