@@ -163,35 +163,124 @@ def _extract_sectors_from_name(name: str) -> list[str]:
     return list(dict.fromkeys(sectors))
 
 
-def build_search_keywords(name: str, sector: str = None) -> list[tuple[str, str]]:
+# 代码前缀 -> 板块/市场 推断（用于个股代码无法直接匹配名称时的补充）
+_CODE_PREFIX_SECTOR = {
+    "600": "沪市主板", "601": "沪市主板", "603": "沪市主板", "605": "沪市主板",
+    "688": "科创板", "689": "科创板",
+    "000": "深市主板", "001": "深市主板", "002": "深市主板", "003": "深市主板",
+    "300": "创业板", "301": "创业板",
+    "200": "B股", "900": "B股",
+}
+
+
+def _infer_sector_from_code(code: str) -> list[str]:
+    """根据股票代码前缀推断所属板块/市场（与名称推断互补）。"""
+    code = code.replace(".", "").replace("SH", "").replace("SZ", "")
+    if not code.isdigit():
+        return []
+    sectors = []
+    for prefix, sector in _CODE_PREFIX_SECTOR.items():
+        if code.startswith(prefix):
+            sectors.append(sector)
+            break
+    return sectors
+
+
+# 板块/行业 -> 关联的概念题材与上下游关键词（用于「总结性」搜索，而非只搜名字）
+_CONCEPT_HINTS = {
+    "白酒": ["高端消费", "宴席", "渠道库存", "提价", "酱香"],
+    "消费": ["社零", "CPI", "可选消费", "必选消费", "以旧换新"],
+    "医药": ["创新药", "集采", "医保谈判", "CXO", "生物制药"],
+    "新能源": ["储能", "动力电池", "碳酸锂", "充电桩", "钠电"],
+    "半导体": ["国产替代", "晶圆", "光刻机", "Chiplet", "设备材料"],
+    "AI": ["大模型", "算力", "英伟达", "GPU", "智能体"],
+    "银行": ["净息差", "不良率", "信贷投放", "降准", "LPR"],
+    "券商": ["成交额", "两融", "投行业务", "经纪业务", "牛市旗手"],
+    "地产": ["销售回暖", "保交楼", "棚改", "限购松绑", "房企融资"],
+    "互联网": ["平台经济", "反垄断", "流量变现", "出海", "港股科技"],
+    "光伏": ["硅料", "组件", "HJT", "BC电池", "海外关税"],
+    "汽车": ["新能源车销量", "智能驾驶", "出口", "以旧换新补贴"],
+    "煤炭": ["长协价", "火力发电", "安监", "高股息"],
+    "电力": ["电价", "来水", "绿电", "容量电价", "火电"],
+    "钢铁": ["粗钢产量", "基建", "地产链", "特钢"],
+    "有色": ["工业金属", "铜价", "金价", "稀土", "锂矿"],
+    "军工": ["装备放量", "卫星", "大飞机", "军贸"],
+    "化工": ["周期", "油价", "PTA", "新材料"],
+    "农业": ["种业", "猪周期", "粮价", "乡村振兴"],
+    "食品": ["提价", "渠道", "消费复苏"],
+    "家电": ["以旧换新", "出口", "地产后周期"],
+    "建材": ["水泥", "玻璃", "基建", "地产链"],
+    "机械": ["挖掘机", "工程机械", "出口", "设备更新"],
+    "电子": ["消费电子", "苹果链", "面板", "MR"],
+    "通信": ["5G", "算力网络", "运营商", "光模块"],
+    "传媒": ["游戏版号", "影视", "广告", "AI应用"],
+    "计算机": ["信创", "软件自主", "数据要素", "政务IT"],
+    "软件": ["信创", "SaaS", "国产软件", "数据要素"],
+    "旅游": ["出行", "免税", "暑期", "客流"],
+    "航空": ["油价", "汇率", "客座率", "出境游"],
+    "物流": ["快递", "供应链", "电商", "运价"],
+    "环保": ["环卫", "水务", "碳减排", "绿电"],
+    "教育": ["政策", "职教", "AI教育"],
+    "保险": ["新单", "NBV", "投资端", "长端利率"],
+    "医疗": ["医疗服务", "器械", "医保", "消费医疗"],
+}
+
+
+def build_search_keywords(name: str, sector: str = None, code: str = None) -> list[tuple[str, str]]:
     """
-    根据标的名称自动生成多组搜索关键词。
+    根据标的自动「总结」出多维度搜索关键词（而非只搜个股名称/代码）。
 
-    返回: [(标签, 搜索关键词), ...]
-
-    生成规则:
+    维度:
     1. 标的名称本身
-    2. 标的+板块关键词（从名称或传入 sector 推断）
-    3. 标的+知名分析师/博主
-    4. 纯板块关键词（用于板块新闻）
+    2. 标的 + 推断板块（名称匹配 + 代码前缀互补）
+    3. 标的 + 关联概念/题材/上下游（从板块映射延伸，概括行业核心矛盾）
+    4. 板块/行业 + 资金面/政策/业绩（总结性宏观视角）
+    5. 知名分析师/博主观点
+    返回: [(标签, 搜索关键词), ...]
     """
     pairs = []
 
     # 1. 标的名称
-    pairs.append(("标的", name))
+    if name:
+        pairs.append(("标的", name))
 
-    # 2. 推断板块
-    sectors = _extract_sectors_from_name(name)
+    # 2. 推断板块：名称匹配 + 代码前缀互补
+    sectors = _extract_sectors_from_name(name or "")
+    if code:
+        sectors += _infer_sector_from_code(code)
     if sector and sector not in sectors:
         sectors.append(sector)
+    # 去重保序
+    sectors = list(dict.fromkeys(sectors))
 
-    for s in sectors[:3]:  # 最多 3 个板块
-        pairs.append(("板块", f"{name} {s}板块"))
+    for s in sectors[:3]:
+        pairs.append(("板块", f"{name} {s}板块" if name else f"{s}板块"))
         pairs.append(("板块", f"{s}板块"))
 
-    # 3. 知名分析师/博主（最多 5 位）
-    for analyst in KNOWN_ANALYSTS[:5]:
-        pairs.append(("大V", f"{name} {analyst}"))
+    # 3. 概念/题材维度（总结行业核心矛盾，而非只搜名字）
+    concept_added = 0
+    for s in sectors[:3]:
+        for concept in _CONCEPT_HINTS.get(s, [])[:4]:
+            if name:
+                pairs.append(("概念", f"{name} {concept}"))
+            else:
+                pairs.append(("概念", f"{s}板块 {concept}"))
+            concept_added += 1
+            if concept_added >= 8:
+                break
+        if concept_added >= 8:
+            break
+
+    # 4. 板块/行业 总结性视角：资金、政策、业绩
+    if sectors:
+        main_sector = sectors[0]
+        for dim in ["资金流向", "政策", "业绩"]:
+            pairs.append(("行业视角", f"{main_sector}板块 {dim}"))
+
+    # 5. 知名分析师/博主（最多 4 位）
+    for analyst in KNOWN_ANALYSTS[:4]:
+        if name:
+            pairs.append(("大V", f"{name} {analyst}"))
 
     return pairs
 
