@@ -536,9 +536,11 @@ def render():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
 
-    with st.spinner('正在刷新行情数据并计算预测路径...'):
-        # 点击「开始预测」强制重新联网拉取最新行情，避免一直显示旧缓存数据
-        df = get_stock_data(symbol, start=start, end=end, force_refresh=True)
+    with st.spinner('正在获取行情数据并计算预测路径...'):
+        # 缓存新鲜度由 get_stock_data 按标的类型差异化判断：
+        # 缓存已覆盖"预期最新交易日"则秒回，否则自动联网刷新，
+        # 既避免休市日反复联网，也不会一直显示旧数据。
+        df = get_stock_data(symbol, start=start, end=end)
 
     if df is None or df.empty or len(df) < 65:
         st.error('数据不足或获取失败，无法生成预测。请尝试其他标的。')

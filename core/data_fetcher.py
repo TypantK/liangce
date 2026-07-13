@@ -389,6 +389,65 @@ def _try_ccxt(exchange_id: str, symbol: str, start: str,
 
 
 # ---------------------------------------------------------------------------
+#  缓存新鲜度策略 —— 按标的类型差异化
+# ---------------------------------------------------------------------------
+
+# 中国大陆法定节假日（休市，无行情）。仅列近月常用日期，过期无害（多联网一次）。
+# 需要更精确可接入交易日历库；此处用轻量清单覆盖常见场景。
+_CN_HOLIDAYS = {
+    # 2026 年（示例，按需补充）
+    "2026-01-01",
+    "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",
+    "2026-04-06", "2026-05-01", "2026-06-19",
+    "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
+}
+
+
+def _prev_business_day(d: pd.Timestamp, holidays: set) -> pd.Timestamp:
+    """返回 d（含）起、往前的最近一个非周末、非节假日的交易日。"""
+    while d.weekday() >= 5 or d.strftime('%Y-%m-%d') in holidays:
+        d -= pd.Timedelta(days=1)
+    return d
+
+
+def _expected_latest_trading_day(symbol: str) -> pd.Timestamp:
+    """按标的类型推算"此刻理应已存在的最新收盘数据日期"。
+
+    缓存里最新一根 K 线 >= 该日期，即视为新鲜，无需联网；否则视为过期需刷新。
+    差异化依据：
+      - 加密货币（USDT，7×24 无休市）：昨天（当日仍在进行中，收盘数据尚未定型）。
+      - 美股（时差）：美东交易日收盘对应北京次日；简化为"上一个美东工作日"，
+        用北京时间减 1 天后取工作日（不含节假日精细处理，容错为多刷一次）。
+      - A 股 / 板块指数：交易时段 15:00 收盘。当天若为交易日且已过 15:30 → 今天；
+        否则回退到最近的交易日（自动跳过周末与节假日）。
+    """
+    now = datetime.now()
+    today = pd.Timestamp(now.date())
+
+    # —— 加密货币：全天候，最新完整日为昨天 ——
+    if symbol.endswith('USDT'):
+        return today - pd.Timedelta(days=1)
+
+    # —— 美股：北京时间比美东早，"今天"的美股尚未开盘/收盘 ——
+    #    以北京时间前一天为基准取工作日（美股节假日不精细处理，容错多刷一次）。
+    is_a_share = symbol.endswith(('.SZ', '.SH'))
+    is_sector = symbol.startswith('SECTOR:')
+    if not is_a_share and not is_sector:
+        base = today - pd.Timedelta(days=1)
+        # 美股不套用 A 股节假日，仅跳过周末
+        while base.weekday() >= 5:
+            base -= pd.Timedelta(days=1)
+        return base
+
+    # —— A 股 / 板块指数：15:00 收盘，留缓冲到 15:30 ——
+    closed_today = (now.hour > 15) or (now.hour == 15 and now.minute >= 30)
+    if closed_today:
+        return _prev_business_day(today, _CN_HOLIDAYS)
+    # 未收盘：当日数据尚未定型，期望值回退到上一个交易日
+    return _prev_business_day(today - pd.Timedelta(days=1), _CN_HOLIDAYS)
+
+
+# ---------------------------------------------------------------------------
 #  公开 API
 # ---------------------------------------------------------------------------
 
@@ -406,8 +465,10 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     相同标的+区间会自动缓存到本地（默认 1 天），第二次起秒级返回，避免重复联网。
 
     start / end 默认为最近一年至今。
-    force_refresh: 为 True 时跳过本地缓存、强制重新联网拉取最新行情
-                   （用于用户主动点击「开始预测」等需要最新数据的场景）。
+    force_refresh: 为 True 时无条件跳过本地缓存、强制重新联网拉取最新行情。
+                   一般无需手动指定：函数会按标的类型（A股/板块/美股/加密货币）
+                   自动判断缓存是否已覆盖"此刻理应存在的最新交易日"，
+                   缺失才联网，避免休市日反复联网、也不会一直返回旧数据。
     """
     if end is None:
         end = datetime.now().strftime('%Y-%m-%d')
@@ -418,14 +479,19 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
     data_store.init_db()
     if not force_refresh and data_store.has_stock_data(symbol, start, end):
         cached = data_store.load_stock_prices(symbol, start, end)
-        # 校验缓存有效：行数足够、索引为日期、且最新数据接近 end（否则视为过期）
+        # 差异化新鲜度判断：缓存最新一根 K 线是否已覆盖"预期最新交易日"。
+        # 不同标的（A股/板块/美股/加密货币）的预期日不同，见 _expected_latest_trading_day。
         if cached is not None and not cached.empty and len(cached) >= 65 \
-                and isinstance(cached.index, pd.DatetimeIndex) \
-                and (pd.Timestamp(end) - cached.index[-1]).days <= 7:
-            print(f"[{symbol}] 命中缓存，共 {len(cached)} 条")
-            return cached
+                and isinstance(cached.index, pd.DatetimeIndex):
+            expected = _expected_latest_trading_day(symbol)
+            latest = pd.Timestamp(cached.index[-1]).normalize()
+            if latest >= expected.normalize():
+                print(f"[{symbol}] 命中缓存（最新 {latest.date()} ≥ 预期 {expected.date()}），共 {len(cached)} 条")
+                return cached
+            else:
+                print(f"[{symbol}] 缓存过期（最新 {latest.date()} < 预期 {expected.date()}），重新联网获取")
         else:
-            print(f"[{symbol}] 缓存不完整/过期，重新联网获取")
+            print(f"[{symbol}] 缓存不完整，重新联网获取")
     elif force_refresh:
         print(f"[{symbol}] 强制刷新，跳过缓存重新联网获取")
 
