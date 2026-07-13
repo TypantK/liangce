@@ -642,7 +642,8 @@ def render_strategy_card(strategy_name, explanation):
 #  统一图表增强：快捷键 + 点击/双击 K 线自动调整范围
 #  所有页面的 Plotly 图表都通过本模块渲染，保证 mac/win 行为一致。
 # ============================================================
-def build_enhanced_chart_html(fig, version=0, theme="dark", auto_zoom=False):
+def build_enhanced_chart_html(fig, version=0, theme="dark", auto_zoom=False,
+                               enable_date_jump=False):
     """
     生成带交互增强的图表 HTML（用于 st.components.v1.html 注入 iframe）。
 
@@ -651,6 +652,12 @@ def build_enhanced_chart_html(fig, version=0, theme="dark", auto_zoom=False):
       - 双击主图 → 放大；双击空白 → 重置全览
       - 快捷键（焦点在图表内或父页面均可）：
           Q=缩放  W=平移  E=全览  A=放大  S=缩小
+
+    enable_date_jump : bool (默认 False)
+      是否在点击 K 线时把日期写入 URL 查询参数（?marvis_chart_date=YYYY-MM-DD）
+      并整页刷新，用于回测页「点击日期看当日新闻」的情绪联动特性。
+      板块预测/优化等不消费该参数的页面应保持 False，否则点击会整页刷新、
+      丢失当前选择（表现为「不知道跳转到哪里去了」）。
     跨平台关键点：iframe 内同时监听自身 keydown 与父页 postMessage，
     父页桥接由 inject_hotkey_bridge_once() 注入（见下），从而无论焦点
     落在 iframe 还是父页面（Windows 常见情况）都能触发。
@@ -694,6 +701,7 @@ def build_enhanced_chart_html(fig, version=0, theme="dark", auto_zoom=False):
 <script>
 window.__chartHotkey = true;
 window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
+window.__chartDateJump = {'true' if enable_date_jump else 'false'};
 (function() {{
     var gd = null;
     var clickCount = 0;
@@ -795,6 +803,8 @@ window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
             var idx = findDateIndex(allX, pt.x);
             if (idx < 0) return;
             zoomToRange(allX, idx - 30, idx + 30);
+            // 仅当开启日期联动（回测页情绪联动）时，才把日期写入 URL 并整页刷新
+            if (!window.__chartDateJump) return;
             try {{
                 var clickedDate = pt.data.x[idx];
                 var d = new Date(clickedDate);
