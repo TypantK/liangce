@@ -206,35 +206,22 @@ def _try_akshare_cn(symbol: str, start: str, end: str) -> pd.DataFrame:
 
 
 def _try_eastmoney_board_kline(board_code: str, start: str, end: str) -> pd.DataFrame:
-    """直连东方财富板块历史 K 线接口（带完整 UA，规避无 UA 被拒）。
+    """直连东方财富板块历史 K 线接口。
 
     东方财富行业板块的行情市场号为 90，secid 形如 "90.BK1036"。
+    统一走 em_client：进程级 QPS 限流 + 自动重试 + 多域名备胎，规避高频被风控。
     返回归一化后的 OHLCV DataFrame。
     """
-    import requests
+    from .em_client import em_kline
 
     secid = f"90.{board_code}"
-    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-    params = {
-        "secid": secid,
-        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-        "klt": "101",            # 日 K
-        "fqt": "0",              # 不复权（板块指数本身无复权概念）
-        "beg": start.replace("-", ""),
-        "end": end.replace("-", ""),
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://quote.eastmoney.com/",
-        "Accept": "*/*",
-    }
-    resp = requests.get(url, params=params, headers=headers, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    klines = data.get("data", {}).get("klines", [])
+    klines = em_kline(
+        secid,
+        klt="101",   # 日 K
+        fqt="0",     # 不复权（板块指数本身无复权概念）
+        beg=start.replace("-", ""),
+        end=end.replace("-", ""),
+    )
     if not klines:
         raise RuntimeError(f"东方财富板块 {board_code} 返回空 K 线")
     rows = []
@@ -338,6 +325,53 @@ def _try_ths_sector(symbol: str, start: str, end: str) -> pd.DataFrame:
 
 
 
+
+
+def _em_secid_for_a_share(symbol: str) -> str:
+    """把 A 股代码转成东财 secid。
+
+    东财市场号：1=沪市（600/601/603/605/688/沪指），0=深市（000/002/300/深指）。
+    "600519.SH" -> "1.600519"；"000001.SZ" -> "0.000001"。
+    """
+    code = symbol.replace(".SH", "").replace(".SZ", "")
+    if symbol.endswith(".SH"):
+        return f"1.{code}"
+    if symbol.endswith(".SZ"):
+        return f"0.{code}"
+    # 无后缀时按首位数字猜测（6 开头为沪市，其余深市）
+    return f"1.{code}" if code.startswith("6") else f"0.{code}"
+
+
+def _try_eastmoney_stock(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """东方财富个股历史 K 线直连（A 股备胎源）。
+
+    走 em_client 统一限流 + 多域名备胎；当 open-stock-data/baostock/akshare
+    全部失败时作为末位兜底，前复权。返回归一化后的 OHLCV DataFrame。
+    """
+    from .em_client import em_kline
+
+    secid = _em_secid_for_a_share(symbol)
+    klines = em_kline(
+        secid,
+        klt="101",   # 日 K
+        fqt="1",     # 前复权，与其它 A 股源保持一致（qfq）
+        beg=start.replace("-", ""),
+        end=end.replace("-", ""),
+    )
+    if not klines:
+        raise RuntimeError(f"东方财富个股 {symbol} 返回空 K 线")
+    rows = []
+    for line in klines:
+        parts = line.split(",")
+        rows.append({
+            "日期": parts[0],
+            "开盘": float(parts[1]),
+            "收盘": float(parts[2]),
+            "最高": float(parts[3]),
+            "最低": float(parts[4]),
+            "成交量": float(parts[5]),
+        })
+    return _normalize_columns(pd.DataFrame(rows))
 
 
 def _try_akshare_us(symbol: str, start: str, end: str) -> pd.DataFrame:
@@ -514,6 +548,7 @@ def get_stock_data(symbol: str, start: Optional[str] = None, end: Optional[str] 
             ("open-stock-data", lambda: _try_open_stock_data(raw, market, start, end)),
             ("baostock",        lambda: _try_baostock(symbol, start, end)),
             ("akshare",         lambda: _try_akshare_cn(symbol, start, end)),
+            ("东方财富直连",     lambda: _try_eastmoney_stock(symbol, start, end)),
         ]
 
     elif symbol.endswith('USDT'):

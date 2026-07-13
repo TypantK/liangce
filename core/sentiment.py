@@ -340,6 +340,7 @@ def search_and_parse_events(
     name: str,
     sector: str = None,
     max_per_query: int = 6,
+    code: str = None,
 ) -> list[tuple[str, int, str]]:
     """
     使用多组关键词并行搜索、解析、去重，返回情绪事件列表。
@@ -424,7 +425,6 @@ def search_and_parse_events(
 
     all_events.sort(key=lambda x: x[0])
     return all_events
-
 
 def get_sentiment_for_date(
     events: list[tuple[str, int, str]],
