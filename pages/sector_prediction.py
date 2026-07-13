@@ -14,7 +14,8 @@ from datetime import datetime, timedelta
 import plotly.graph_objects as go
 
 from core.data_fetcher import STOCK_POOL, get_stock_data
-from utils.chart import (UP_GREEN, DN_RED, CN_FONT)
+from utils.chart import (UP_GREEN, DN_RED, CN_FONT,
+                        build_enhanced_chart_html, inject_hotkey_bridge_once)
 
 
 # ============================================================
@@ -552,7 +553,15 @@ def render():
 
     # ========== 图表 ==========
     fig = _plot_prediction(df, future_dates, bull_ohlc, base_ohlc, bear_ohlc, tech, theme=theme)
-    st.plotly_chart(fig, use_container_width=True, key='sector_pred_chart')
+
+    if "sector_chart_version" not in st.session_state:
+        st.session_state.sector_chart_version = 0
+    chart_html = build_enhanced_chart_html(
+        fig, version=st.session_state.sector_chart_version, theme=theme, auto_zoom=False,
+    )
+    inject_hotkey_bridge_once()
+    st.components.v1.html(chart_html, height=680)
+    st.caption("点击 K 线 → 放大 60 天 | 双击主图 → 放大 60 天 / 双击空白 → 重置 | Q=缩放 W=平移 E=全览")
 
     # ========== 预测起点信息 ==========
     last_price = df['close'].iloc[-1]

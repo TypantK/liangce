@@ -175,6 +175,28 @@ def _render_card(result, theme):
 
     price_str = f"{result['recent_price']:.2f}" if result['recent_price'] else "N/A"
 
+    # 合并同标的多个策略的命中信息
+    hit_strategies = result.get('_hit_strategies', [result.get('strategy', '')])
+    hit_strategies = [s for s in hit_strategies if s]
+    strategy_str = "、".join(hit_strategies) if hit_strategies else result.get('strategy', '')
+
+    # 原因：去重后展示（最多 2 条，避免卡片过长）
+    all_reasons = result.get('_all_reasons', [result.get('signal_desc', '')])
+    all_reasons = [r for r in all_reasons if r]
+    seen = set()
+    unique_reasons = []
+    for rs in all_reasons:
+        if rs not in seen:
+            seen.add(rs)
+            unique_reasons.append(rs)
+    extra = ""
+    if len(unique_reasons) > 1:
+        shown = unique_reasons[:2]
+        extra = "；另有 " + str(len(unique_reasons) - len(shown)) + " 个策略同样触发" if len(unique_reasons) > len(shown) else ""
+        reason_str = "；".join(shown) + extra
+    else:
+        reason_str = unique_reasons[0] if unique_reasons else result.get('signal_desc', '')
+
     return f"""
     <div style="
         background:{bg};
@@ -198,10 +220,10 @@ def _render_card(result, theme):
             ">{tag_text}</span>
         </div>
         <div style="font-size:13px;color:{desc_color};margin-bottom:4px">
-            {result['signal_desc']}
+            {reason_str}
         </div>
         <div style="display:flex;justify-content:space-between;font-size:11px;color:{'#6b7094' if theme == 'dark' else '#9e9e9e'}">
-            <span>策略：{result['strategy']}</span>
+            <span>策略：{strategy_str}</span>
             <span>价格：{price_str} ｜ 信号日：{result['signal_date']}</span>
         </div>
     </div>"""
@@ -292,6 +314,40 @@ def _continue_scan():
         st.session_state._ds_running = False
 
 
+# 信号优先级：数字越小越优先（用于同一标的多策略去重）
+_SIGNAL_PRIORITY = {
+    "买入信号": 0,
+    "卖出信号": 1,
+    "持有中": 2,
+}
+
+
+def _dedupe_by_symbol(results):
+    """
+    按标的（symbol）去重合并。
+
+    同一标的被多个策略扫描时会产生多条记录，这里只保留一条：
+      1. 按优先级取最优信号（买入 > 卖出 > 持有）；
+      2. 把命中该信号的全部策略与原因合并到描述中。
+    """
+    merged = {}
+    for r in results:
+        sym = r['symbol']
+        if sym not in merged:
+            merged[sym] = dict(r)  # 浅拷贝
+            merged[sym]['_hit_strategies'] = [r['strategy']]
+            merged[sym]['_all_reasons'] = [r['signal_desc']]
+            continue
+        exist = merged[sym]
+        exist['_hit_strategies'].append(r['strategy'])
+        exist['_all_reasons'].append(r['signal_desc'])
+        # 若当前记录信号优先级更优，则覆盖主记录（信号/价格/日期）
+        if _SIGNAL_PRIORITY.get(r['signal'], 99) < _SIGNAL_PRIORITY.get(exist['signal'], 99):
+            for k in ('signal', 'signal_date', 'signal_desc', 'recent_price', 'category'):
+                exist[k] = r[k]
+    return list(merged.values())
+
+
 def _show_results(theme):
     """展示上次扫描的完整结果"""
     all_results = st.session_state._ds_results
@@ -305,10 +361,12 @@ def _show_results(theme):
     else:
         signals_of_interest = ["买入信号", "卖出信号", "持有中"]
 
-    filtered = [r for r in all_results if r['signal'] in signals_of_interest]
+    raw_filtered = [r for r in all_results if r['signal'] in signals_of_interest]
+    # 按标的去重合并（同一标的只显示一条）
+    filtered = _dedupe_by_symbol(raw_filtered)
 
     st.markdown("---")
-    st.subheader(f"扫描结果（共 {len(filtered)} 条信号）")
+    st.subheader(f"扫描结果（共 {len(filtered)} 个标的）")
 
     if not filtered:
         st.info("今日暂无符合条件的信号")
@@ -373,10 +431,10 @@ def render():
     col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
-        type_options = ["全部", "A股", "美股", "加密货币"]
-        selected_types = st.multiselect(
-            "标的类型", type_options, default=["全部"],
-            help="筛选要扫描的标的类型",
+        market_options = ["全部市场", "A股", "美股", "加密货币"]
+        selected_market = st.selectbox(
+            "市场", market_options, index=0,
+            help="筛选要扫描的标的所在市场",
             disabled=st.session_state._ds_running
         )
     with col2:
@@ -408,7 +466,7 @@ def render():
         pool_items = []
         for name, code in STOCK_POOL.items():
             cat = _classify_symbol(code)
-            if "全部" in selected_types or cat in selected_types:
+            if selected_market == "全部市场" or cat == selected_market:
                 pool_items.append((name, code, cat))
 
         if not pool_items:
@@ -416,7 +474,7 @@ def render():
             return
 
         strategies = list(STRATEGY_REGISTRY.keys())
-        _start_scan(pool_items, strategies, selected_types, selected_signal)
+        _start_scan(pool_items, strategies, selected_market, selected_signal)
         st.rerun()
 
     # 情况 3：空闲状态 — 有历史结果则展示，否则提示

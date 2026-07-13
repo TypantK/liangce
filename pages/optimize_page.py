@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from core.data_fetcher import STOCK_POOL, get_stock_data
 from core.strategies import STRATEGY_REGISTRY
 from core.optimizer import grid_search, optuna_optimize, METRIC_LABELS
+from utils.chart import build_enhanced_chart_html, inject_hotkey_bridge_once
 
 # ---- 深色主题配色（与 chart.py 对齐）----
 BG       = '#131520'
@@ -246,7 +247,14 @@ def render():
 
     # ---- 热力图 ----
     fig = _build_heatmap(result, theme=theme)
-    st.plotly_chart(fig, use_container_width=True)
+    if "opt_chart_version" not in st.session_state:
+        st.session_state.opt_chart_version = 0
+    chart_html = build_enhanced_chart_html(
+        fig, version=st.session_state.opt_chart_version, theme=theme, auto_zoom=False,
+    )
+    inject_hotkey_bridge_once()
+    st.components.v1.html(chart_html, height=560)
+    st.caption("点击单元格 → 放大该区域 | 双击 → 重置 | Q=缩放 W=平移 E=全览")
 
     # ---- 最优参数 ----
     st.subheader("最优参数组合")

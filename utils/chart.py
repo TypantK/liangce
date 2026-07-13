@@ -636,3 +636,341 @@ def render_strategy_card(strategy_name, explanation):
         f"⚠️  **劣势：** {explanation.get('cons', '')}",
     ]
     return "\n".join(lines)
+
+
+# ============================================================
+#  统一图表增强：快捷键 + 点击/双击 K 线自动调整范围
+#  所有页面的 Plotly 图表都通过本模块渲染，保证 mac/win 行为一致。
+# ============================================================
+def build_enhanced_chart_html(fig, version=0, theme="dark", auto_zoom=False):
+    """
+    生成带交互增强的图表 HTML（用于 st.components.v1.html 注入 iframe）。
+
+    增强能力：
+      - 点击 K 线/折线 → 以该点为中心放大 60 天窗口
+      - 双击主图 → 放大；双击空白 → 重置全览
+      - 快捷键（焦点在图表内或父页面均可）：
+          Q=缩放  W=平移  E=全览  A=放大  S=缩小
+    跨平台关键点：iframe 内同时监听自身 keydown 与父页 postMessage，
+    父页桥接由 inject_hotkey_bridge_once() 注入（见下），从而无论焦点
+    落在 iframe 还是父页面（Windows 常见情况）都能触发。
+    """
+    import uuid
+    chart_id = f"chart_{uuid.uuid4().hex[:8]}"
+
+    if theme == "light":
+        _body_bg = '#ffffff'
+        _body_color = '#1f2937'
+    else:
+        _body_bg = '#131520'
+        _body_color = '#fff'
+
+    fig_html = fig.to_html(
+        include_plotlyjs='cdn',
+        full_html=False,
+        config={
+            # 关闭 Plotly 自带双击重置，交给我们自己的 doubleclick 处理
+            'doubleClick': False,
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtons': [
+                ['zoom2d', 'pan2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d'],
+            ],
+        },
+        div_id=chart_id,
+    )
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {{ margin: 0; padding: 0; background: {_body_bg}; color: {_body_color}; font-family: sans-serif; }}
+        #{chart_id} {{ width: 100%; }}
+    </style>
+</head>
+<body>
+{fig_html}
+<script>
+window.__chartHotkey = true;
+window.__chartAutoZoom = {'true' if auto_zoom else 'false'};
+(function() {{
+    var gd = null;
+    var clickCount = 0;
+    var zoomReady = false;
+
+    function findDateIndex(allX, targetX) {{
+        if (!allX || !allX.length) return -1;
+        var idx = -1, minDist = Infinity;
+        for (var i = 0; i < allX.length; i++) {{
+            var dist = Math.abs(new Date(allX[i]) - new Date(targetX));
+            if (dist < minDist) {{ minDist = dist; idx = i; }}
+        }}
+        return idx;
+    }}
+
+    function zoomToRange(allX, startIdx, endIdx) {{
+        if (!gd) return;
+        startIdx = Math.max(0, startIdx);
+        endIdx = Math.min(allX.length - 1, endIdx);
+        if (startIdx < endIdx) {{
+            var relayoutObj = {{
+                'xaxis.autorange': false,
+                'yaxis.autorange': false,
+                'xaxis.range': [allX[startIdx], allX[endIdx]]
+            }};
+            var fullTraces = gd._fullData || gd.data;
+            var found = false;
+            // 1) Candlestick/OHLC → use high/low
+            for (var t = 0; t < fullTraces.length; t++) {{
+                var tr = fullTraces[t];
+                if ((tr.type === 'candlestick' || tr.type === 'ohlc') && tr.high && tr.low) {{
+                    var yHi = -Infinity, yLo = Infinity;
+                    for (var i = startIdx; i <= endIdx; i++) {{
+                        var hi = tr.high[i], lo = tr.low[i];
+                        if (hi != null && hi > yHi) yHi = hi;
+                        if (lo != null && lo < yLo) yLo = lo;
+                    }}
+                    if (isFinite(yHi) && isFinite(yLo) && yHi > yLo) {{
+                        var pad = (yHi - yLo) * 0.08;
+                        relayoutObj['yaxis.range'] = [yLo - pad, yHi + pad];
+                    }}
+                    found = true;
+                    break;
+                }}
+            }}
+            // 2) Fallback: Scatter/line/heatmap → use y values
+            if (!found) {{
+                for (var t = 0; t < fullTraces.length; t++) {{
+                    var tr2 = fullTraces[t];
+                    if (tr2.y && tr2.y.length > 0) {{
+                        var yHi = -Infinity, yLo = Infinity;
+                        for (var i = startIdx; i <= endIdx; i++) {{
+                            var v = tr2.y[i];
+                            if (v != null && isFinite(v)) {{
+                                if (v > yHi) yHi = v;
+                                if (v < yLo) yLo = v;
+                            }}
+                        }}
+                        if (isFinite(yHi) && isFinite(yLo) && yHi > yLo) {{
+                            var pad = (yHi - yLo) * 0.08;
+                            relayoutObj['yaxis.range'] = [yLo - pad, yHi + pad];
+                        }}
+                        break;
+                    }}
+                }}
+            }}
+            Plotly.relayout(gd, relayoutObj);
+        }}
+    }}
+
+    function bindClickHandlers() {{
+        if (!gd) return;
+        gd.removeAllListeners('plotly_click');
+        gd.removeAllListeners('plotly_selected');
+        gd.removeAllListeners('plotly_doubleclick');
+
+        gd.on('plotly_doubleclick', function(data) {{
+            if (!gd) return;
+            var onMain = !!(data && data.points && data.points.length > 0);
+            if (onMain) {{
+                var pt = data.points[0];
+                var allX = pt.data.x;
+                if (!allX || !allX.length) return;
+                var idx = findDateIndex(allX, pt.x);
+                if (idx < 0) return;
+                zoomToRange(allX, idx - 30, idx + 30);
+            }} else {{
+                Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+            }}
+        }});
+
+        gd.on('plotly_click', function(data) {{
+            clickCount++;
+            var pts = (data && data.points) ? data.points.length : 0;
+            if (!pts) return;
+            var pt = data.points[0];
+            var allX = pt.data.x;
+            if (!allX || !allX.length) return;
+            var idx = findDateIndex(allX, pt.x);
+            if (idx < 0) return;
+            zoomToRange(allX, idx - 30, idx + 30);
+            try {{
+                var clickedDate = pt.data.x[idx];
+                var d = new Date(clickedDate);
+                if (!isNaN(d.getTime())) {{
+                    var yyyy = d.getFullYear();
+                    var mm = String(d.getMonth() + 1).padStart(2, '0');
+                    var dd = String(d.getDate()).padStart(2, '0');
+                    var dateStr = yyyy + '-' + mm + '-' + dd;
+                    var url = new URL(window.top.location.href);
+                    url.searchParams.set('marvis_chart_date', dateStr);
+                    window.top.location.href = url.toString();
+                }}
+            }} catch(e) {{}}
+        }});
+
+        gd.on('plotly_selected', function(data) {{
+            if (!data || !data.range || !data.range.x) return;
+            if (!data.points || !data.points.length) {{
+                Plotly.relayout(gd, {{'xaxis.range': [data.range.x[0], data.range.x[1]]}});
+                return;
+            }}
+            var allX = data.points[0].data.x;
+            if (!allX || !allX.length) return;
+            var startIdx = findDateIndex(allX, data.range.x[0]);
+            var endIdx = findDateIndex(allX, data.range.x[1]);
+            if (startIdx >= 0 && endIdx >= 0) zoomToRange(allX, startIdx, endIdx);
+        }});
+    }}
+
+    function setupZoom() {{
+        if (zoomReady || !gd) return;
+        zoomReady = true;
+        bindClickHandlers();
+
+        var rebindLock = false;
+        gd.on('plotly_relayout', function(eventData) {{
+            if (rebindLock) return;
+            rebindLock = true;
+            var isAutoscale = eventData && ('xaxis.autorange' in eventData || 'yaxis.autorange' in eventData);
+            var delay = isAutoscale ? 300 : 80;
+            setTimeout(function() {{
+                bindClickHandlers();
+                var cd = (gd._fullLayout || {{}}).dragmode || 'pan';
+                Plotly.relayout(gd, {{dragmode: cd}});
+                setTimeout(function() {{ rebindLock = false; }}, 150);
+            }}, delay);
+        }});
+
+        var currentDrag = (gd._fullLayout || {{}}).dragmode || 'pan';
+        if (window.__chartAutoZoom) {{
+            Plotly.relayout(gd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+            setTimeout(function() {{
+                var btn = gd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+                if (btn) btn.click();
+            }}, 150);
+        }} else {{
+            Plotly.relayout(gd, {{'xaxis.autorange': false, 'yaxis.autorange': false, dragmode: currentDrag}});
+        }}
+    }}
+
+    function tryInit() {{
+        gd = document.getElementById('{chart_id}');
+        if (!gd) gd = document.querySelector('.js-plotly-plot');
+        if (!gd) gd = document.querySelector('.plotly-graph-div');
+        if (!gd) gd = document.querySelector('[id^="chart_"]');
+        if (!gd) {{ setTimeout(tryInit, 300); return; }}
+        if (gd._fullLayout && gd._fullLayout._initialized) {{
+            setupZoom();
+        }} else {{
+            gd.once && gd.once('plotly_afterplot', setupZoom);
+            gd.on('plotly_afterplot', setupZoom);
+            setTimeout(function() {{ if (!zoomReady) setupZoom(); }}, 2000);
+        }}
+    }}
+
+    setTimeout(tryInit, 200);
+
+    // ===== 快捷键处理（在 iframe 正确上下文内执行）=====
+    function handleHotkey(e) {{
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.isComposing || (e.key === 'Process')) return;
+        var tag = (document.activeElement || {{}}).tagName || '';
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+        var localGd = gd || (window.__chartDebug && window.__chartDebug.getGd && window.__chartDebug.getGd());
+        if (!localGd) return;
+        var key = (e.key || '').toLowerCase();
+        var handled = true;
+        if (key === 'q') {{
+            Plotly.relayout(localGd, {{dragmode: 'zoom'}});
+        }} else if (key === 'w') {{
+            Plotly.relayout(localGd, {{dragmode: 'pan'}});
+        }} else if (key === 'e') {{
+            Plotly.relayout(localGd, {{'xaxis.autorange': true, 'yaxis.autorange': true}});
+            setTimeout(function() {{
+                var zoomOutBtn = localGd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+                if (zoomOutBtn) zoomOutBtn.click();
+            }}, 150);
+        }} else if (key === 'a') {{
+            var zin = localGd.querySelector('.modebar-btn[data-attr="zoom"][data-val="in"]');
+            if (zin) zin.click();
+        }} else if (key === 's') {{
+            var zout = localGd.querySelector('.modebar-btn[data-attr="zoom"][data-val="out"]');
+            if (zout) zout.click();
+        }} else {{
+            handled = false;
+        }}
+        if (handled && e.preventDefault) e.preventDefault();
+        return handled;
+    }}
+
+    // 1) 焦点在 iframe 内部时，直接监听本页 keydown
+    document.addEventListener('keydown', function(e) {{
+        handleHotkey(e);
+    }});
+
+    // 2) 焦点在父页面（Streamlit 主框架）时：父页桥接通过 postMessage 转发，
+    //    在本 iframe 正确的上下文里执行（跨平台关键，解决 Windows 失效）。
+    window.addEventListener('message', function(ev) {{
+        try {{
+            var d = ev.data;
+            if (!d || d.__chartHotkey !== true) return;
+            handleHotkey({{
+                key: d.key,
+                ctrlKey: d.ctrlKey, metaKey: d.metaKey, altKey: d.altKey,
+                isComposing: false, preventDefault: function() {{}}
+            }});
+        }} catch (err) {{}}
+    }});
+}})();
+</script>
+<!-- cv:{version} -->
+</body>
+</html>"""
+    return html
+
+
+def inject_hotkey_bridge_once():
+    """
+    把「父页面按键桥接」注入 Streamlit 主框架（真正的父页面上下文）。
+
+    必须在调用 st.components.v1.html 渲染增强图表之前/之后调用一次。
+    通过 st.markdown(unsafe_allow_html=True) 注入，确保不论焦点在父页面
+    还是图表 iframe，快捷键都能触发（Windows 常见焦点在父页面的情况）。
+    用 session_state 保证整页只注入一次。
+    """
+    import streamlit as st
+    if st.session_state.get("_chart_hotkey_bridge_injected"):
+        return
+    st.session_state._chart_hotkey_bridge_injected = True
+
+    bridge = """
+<script>
+(function() {
+    if (window.__chartHotkeyBridgeInjected) return;
+    window.__chartHotkeyBridgeInjected = true;
+    document.addEventListener('keydown', function(e) {
+        var tag = (document.activeElement || {}).tagName || '';
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        // 转发给所有含 __chartHotkey 标记的图表 iframe
+        var frames = document.querySelectorAll('iframe[srcdoc]');
+        for (var i = 0; i < frames.length; i++) {
+            var f = frames[i];
+            if (!f.contentWindow) continue;
+            if (f.srcdoc && f.srcdoc.indexOf('__chartHotkey') !== -1) {
+                try {
+                    f.contentWindow.postMessage({
+                        __chartHotkey: true,
+                        key: e.key,
+                        ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey
+                    }, '*');
+                } catch (err) {}
+            }
+        }
+    }, true);
+})();
+</script>
+"""
+    st.markdown(bridge, unsafe_allow_html=True)

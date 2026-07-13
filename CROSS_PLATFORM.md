@@ -2,47 +2,54 @@
 
 本项目需同时支持 macOS 与 Windows 运行。以下为开发时务必留意的坑与约定。
 
-## 1. Streamlit 图表内快捷键（Q/W/E/A/S 等）失效问题
+## 1. Streamlit 图表内快捷键（Q/W/E/A/S）与点击/双击 K 线
 
-### 现象
-图表（`pages/backtest_page.py` 的 `_build_chart_html`）通过 `st.components.v1.html` 注入，
-快捷键由注入的 JS `keydown` 监听实现。**该方案在 macOS 与 Windows 上均应生效**（已验证）。
+### 需求
+所有图表（回测 K 线、基金回测、板块预测、参数优化热力图）统一支持：
+- 点击 K 线/折线 → 以该点为中心放大 60 天窗口
+- 双击主图 → 放大；双击空白 → 重置全览
+- 快捷键（焦点在图表内或父页面均可生效）：
+  `Q`=缩放  `W`=平移  `E`=全览  `A`=放大  `S`=缩小
 
-### 根因
-`st.components.v1.html` 把内容渲染进一个 `<iframe>`。快捷键原本只监听了 **iframe 内部的
-`document`**。当焦点停留在父页面（Streamlit 主框架）时，Windows 下按键事件不会冒泡到 iframe，
-导致监听收不到事件；macOS 上因焦点管理差异偶然能用，属于"假正常"。
+### 统一实现（务必复用，勿各自造轮子）
+所有图表渲染都走 `utils/chart.py` 的两个共享函数：
 
-### 修复约定（已修复 — v2）
-旧方案直接在 `window.top` 上 `addEventListener('keydown', handleHotkey)` 并就地执行。
-**该方案在 Windows 上失效的根因**：`handleHotkey` 内部通过 `window.__chartDebug.getGd()`
-访问图表对象 `gd`，但 `window.__chartDebug` 挂在 **iframe 内部** 的 `window` 上；
-父页面转发的事件回调在父页面上下文执行，访问到的 `window.__chartDebug` 为 `undefined`
-→ `gd` 为 `undefined` → 直接 return，快捷键永远不生效。这是上下文错位，并非焦点问题。
+```python
+from utils.chart import build_enhanced_chart_html, inject_hotkey_bridge_once
 
-正确做法：**用 `postMessage` 把按键从父页面转发进 iframe，由 iframe 内部（能正确
-访问 `gd` / `Plotly`）执行处理函数**。
-
-```js
-// —— iframe 内部（_build_chart_html 第二个 <script>）——
-window.addEventListener('message', function(ev) {
-  var d = ev.data;
-  if (!d || d.__chartHotkey !== true) return;
-  handleHotkey({ key: d.key, ctrlKey: d.ctrlKey, metaKey: d.metaKey, altKey: d.altKey,
-                 preventDefault: function(){} });
-});
-
-// —— 父页面桥接（_build_chart_html 第三个 <script>）——
-// 在父页面 document 上捕获 keydown（捕获阶段），过滤输入框后 postMessage 给图表 iframe
-document.addEventListener('keydown', function(e) {
-  var tag = (document.activeElement || {}).tagName || '';
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
-  var frame = document.querySelector('iframe[id^="chart_"]') || ...;
-  frame.contentWindow.postMessage({ __chartHotkey: true, key: e.key, ... }, '*');
-}, true);
+chart_html = build_enhanced_chart_html(fig, version=..., theme=theme, auto_zoom=False)
+inject_hotkey_bridge_once()                       # 注入父页桥接（整页一次）
+st.components.v1.html(chart_html, height=...)    # 渲染进 iframe
 ```
 
-后续新增任何图表内键盘交互，都必须走 `postMessage` 转发 + iframe 内执行，否则 Windows 必现失效。
+> ⚠️ 禁止再用 `st.plotly_chart` 渲染需要快捷键/点击放大的图表——
+> 它走 Streamlit 自带 iframe，无法注入我们的增强 JS，会导致功能缺失（历史 bug）。
+> 若只需静态展示、无需交互增强，才可用 `st.plotly_chart`。
+
+### 跨平台生效原理（为何 Windows 之前失效）
+- 图表通过 `st.components.v1.html` 渲染进一个 `<iframe>`，增强 JS 运行在 iframe 内部，
+  能正确访问图表对象 `gd` 与 `Plotly`。
+- **macOS**：默认焦点落在 iframe 内，iframe 自身的 `document` keydown 监听即可生效。
+- **Windows**：焦点常停留在父页面（Streamlit 主框架），按键事件不冒泡进 iframe → 失效。
+
+正确做法（当前方案）：
+1. iframe 内部：监听自身 `document` keydown **且** 监听 `window` 的 `message` 事件。
+2. 父页面桥接：通过 `st.markdown(..., unsafe_allow_html=True)` 注入到**真正的父页面上下文**
+   （`inject_hotkey_bridge_once` 内实现），在父页 `document` 捕获 keydown，过滤输入框后
+   `postMessage` 给图表 iframe（`srcdoc` 含 `__chartHotkey` 标记的那个）。
+3. iframe 收到 `postMessage` 后在**正确上下文**执行 `handleHotkey`。
+
+> 历史坑：曾把"父页桥接"错误地写进 `_build_chart_html` 返回的 iframe HTML 里，
+> 它运行在 iframe 上下文、找不到父页面的 `iframe[srcdoc]`，等于无效。
+> 桥接脚本必须经由 `st.markdown` 注入父页面。
+
+### 健壮性要点
+- 处理函数过滤 `ctrl/meta/alt` 组合键，避免劫持系统快捷键。
+- 过滤 `e.isComposing`（中文输入法合成中），避免误触。
+- 仅在焦点不在 `INPUT/TEXTAREA/SELECT` 时触发。
+- 用 `e.key`（不是 `keyCode`），并 `|| ''` 兜底再 `toLowerCase()`。
+- `tryInit` 用多种选择器兜底获取 Plotly div：`#chart_id` / `.js-plotly-plot` /
+  `.plotly-graph-div` / `[id^="chart_"]`，并监听 `plotly_afterplot` 确保绑定成功。
 **切勿再用 `window.top.addEventListener` 直接调用依赖 iframe 内部变量的函数。**
 
 ### 额外健壮性
