@@ -140,35 +140,16 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
 
         def _check_sentiment(self, dt_str):
             """返回 (分数, 标签, 新闻列表)。
-            先查指定日期附近事件；无匹配时降级为全局情绪（所有事件平均分 + 全部标题）。"""
+
+            仅使用「当日及近窗(window_days)内」的真实新闻情绪。
+            关键修复：不再降级为「全局历史事件平均分」——旧逻辑会让每个没有
+            当天新闻的交易日都被历史均分判定，若回测区间整体偏空则长期锁死买入，
+            导致交易次数为 0。无当日/近窗新闻时直接中性(0)，不拦截、不强平。
+            """
             if not self._sentiment_events:
                 return 0.0, "", []
             score, headlines = get_sentiment_for_date(
                 self._sentiment_events, dt_str, window_days=3)
-            if score == 0.0 and not headlines:
-                # 无日期匹配 → 降级为全局情绪（仅使用交易日期及之前的历史事件，避免未来信息泄露）
-                try:
-                    target_dt = datetime.strptime(dt_str[:10], "%Y-%m-%d")
-                except (ValueError, TypeError):
-                    return 0.0, "", []
-
-                past_events = []
-                for date_str, s, t in self._sentiment_events:
-                    try:
-                        event_dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
-                    except (ValueError, TypeError):
-                        continue
-                    if event_dt <= target_dt:
-                        past_events.append((date_str, s, t))
-
-                if not past_events:
-                    return 0.0, "", []
-
-                all_scores = [s for _, s, _ in past_events]
-                global_score = round(sum(all_scores) / len(all_scores), 2)
-                all_titles = [t for _, _, t in past_events]
-                tag = format_sentiment_tag(global_score)
-                return global_score, tag, all_titles[:3]
             tag = format_sentiment_tag(score)
             return score, tag, headlines
 
@@ -191,11 +172,14 @@ def _make_logged_strategy(base_class, strategy_name, sentiment_events=None):
                 sent_score, sent_tag, sent_news = self._check_sentiment(dt_str)
                 self._last_sentiment_score = sent_score
                 # 记录情绪状态，供 buy() 拦截使用
-                self._sentiment_blocked = (sent_score < 0)
+                # 仅在「明确的利空聚集」(近窗加权分 <= -2 且有新闻) 时暂停买入，
+                # 避免轻微利空就长期锁死交易（旧逻辑 sent_score<0 过激）。
+                self._sentiment_blocked = (sent_score <= -2 and bool(sent_news))
                 # 标记当前日期字符串，供 buy() 拦截日志使用
                 self._current_dt_str = dt_str
                 # 极端利空 → 强制平仓，记录触发新闻供 notify_trade 使用
-                if sent_score < -3 and self.position:
+                # 极端利空 -> 强制平仓（阈值收紧至 -5 且确有强利空新闻）
+                if sent_score < -5 and bool(sent_news) and self.position:
                     self._sentiment_force_news = list(sent_news[:3])
                     self.close()
                     return

@@ -745,8 +745,8 @@ def _render_fund(item, theme):
     if sentiment_mode:
         with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
             try:
-                raw_news = fetch_news(item["name"], max_results=12)
-                sentiment_events = parse_events_from_search(raw_news, item["name"])
+                raw_news = fetch_news(item["code"], max_results=12)
+                sentiment_events = parse_events_from_search(raw_news, item["code"])
                 if sentiment_events:
                     sentiment_summary = summarize_news(raw_news)
                 else:
@@ -768,19 +768,9 @@ def _render_fund(item, theme):
     nav_df = st.session_state[nav_cache_key]
     full_data = fund_nav_to_ohlcv(nav_df)
 
-    # 情绪模式：从价格数据补充合成事件，覆盖全回测区间
+    # 情绪模式：仅使用真实抓取的新闻事件（不再用价格合成假事件，避免全局情绪恒负锁死交易）
     if sentiment_mode and sentiment_events is not None:
-        price_events = generate_events_from_price(full_data, item["name"], target_count=30)
-        sentiment_events.extend(price_events)
-        seen = set()
-        deduped = []
-        for e in sorted(sentiment_events, key=lambda x: x[0]):
-            key = (e[0], e[2])
-            if key not in seen:
-                seen.add(key)
-                deduped.append(e)
-        sentiment_events = deduped
-        st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件（含价格驱动）")
+        st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件")
 
     # ---- 交易窗口检查 ----
     start_dt = pd.Timestamp(backtest_start)
@@ -918,8 +908,8 @@ def _render_backtest(item, theme):
     if sentiment_mode:
         with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
             try:
-                raw_news = fetch_news(item["name"], max_results=12)
-                sentiment_events = parse_events_from_search(raw_news, item["name"])
+                raw_news = fetch_news(item["code"], max_results=12)
+                sentiment_events = parse_events_from_search(raw_news, item["code"])
                 if sentiment_events:
                     sentiment_summary = summarize_news(raw_news)
                 else:
@@ -942,19 +932,9 @@ def _render_backtest(item, theme):
             st.session_state[stock_cache_key] = raw
         full_data = st.session_state[stock_cache_key]
 
-    # 情绪模式：从价格数据补充合成事件，覆盖全回测区间
+    # 情绪模式：仅使用真实抓取的新闻事件（不再用价格合成假事件，避免全局情绪恒负锁死交易）
     if sentiment_mode and sentiment_events is not None:
-        price_events = generate_events_from_price(full_data, item["name"], target_count=30)
-        sentiment_events.extend(price_events)
-        seen = set()
-        deduped = []
-        for e in sorted(sentiment_events, key=lambda x: x[0]):
-            key = (e[0], e[2])
-            if key not in seen:
-                seen.add(key)
-                deduped.append(e)
-        sentiment_events = deduped
-        st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件（含价格驱动）")
+        st.sidebar.caption(f"已抓取 {len(sentiment_events)} 条情绪事件")
 
     # ---- 交易窗口检查 ----
     start_dt = pd.Timestamp(backtest_start)
