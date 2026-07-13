@@ -41,7 +41,8 @@ for item in strong_bear_news:
 # 解析为事件
 events = parse_events_from_search(strong_bear_news, "AI")
 print(f"\n=== 解析后事件列表 ===")
-for date_str, score, title in events:
+for ev in events:
+    date_str, score, title = ev[0], ev[1], ev[2]
     print(f"{date_str} | {score:2d} | {title}")
 
 # 计算2026-06-05的情绪分数

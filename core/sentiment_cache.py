@@ -129,12 +129,21 @@ def _sentiment_cache_valid(rows: List[dict]) -> bool:
     return (datetime.now() - latest_created) <= timedelta(hours=SENTIMENT_TTL_HOURS)
 
 
-def _rows_to_events(rows: List[dict]) -> List[Tuple[str, int, str]]:
-    """把 sentiment_events 表记录转回 [(date, score, title), ...] 事件元组。"""
+def _rows_to_events(rows: List[dict]) -> List[Tuple[str, int, str, str]]:
+    """把 sentiment_events 表记录转回 [(date, score, title, url), ...] 事件元组。
+
+    第四元素 url 从库表读回（_events_to_records 已写入），保证命中缓存后
+    渲染层仍能跳转，避免「首次能跳、刷新后不能跳」的不一致。
+    """
     events = []
     for r in rows:
         score = r.get("score")
-        events.append((r.get("date", ""), score if score is not None else 0, r.get("title", "")))
+        events.append((
+            r.get("date", ""),
+            score if score is not None else 0,
+            r.get("title", ""),
+            r.get("url", "") or "",
+        ))
     return events
 
 

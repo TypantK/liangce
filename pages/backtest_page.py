@@ -854,7 +854,10 @@ def _render_fund(item, theme):
         if sentiment_events:
             day_events = [e for e in sentiment_events if e[0] == clicked_date]
             if day_events:
-                for _date_str, _score, _title in day_events:
+                for _ev in day_events:
+                    if not isinstance(_ev, (list, tuple)) or len(_ev) < 3:
+                        continue
+                    _date_str, _score, _title = _ev[0], _ev[1], _ev[2]
                     if _score > 0:
                         st.markdown(
                             f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
@@ -1023,7 +1026,10 @@ def _render_backtest(item, theme):
         if sentiment_events:
             day_events = [e for e in sentiment_events if e[0] == clicked_date]
             if day_events:
-                for _date_str, _score, _title in day_events:
+                for _ev in day_events:
+                    if not isinstance(_ev, (list, tuple)) or len(_ev) < 3:
+                        continue
+                    _date_str, _score, _title = _ev[0], _ev[1], _ev[2]
                     if _score > 0:
                         st.markdown(
                             f'<div style="background:#e8f5e9;padding:8px 12px;border-radius:6px;margin:4px 0;'
