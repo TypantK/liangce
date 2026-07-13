@@ -348,18 +348,33 @@ def search_and_parse_events(
               实际搜索函数（如 sentiment_fetcher.fetch_news）
     name:     标的名称
     sector:   可选，行业分类信息
+    code:     可选，标的代码（如 '600519.SH'）。若提供，优先用代码走 akshare
+              个股新闻通道（强相关），其余维度用名称/板块词走的 web 通道。
 
     返回: [(date_str, score, title), ...]
 
     流程:
-    1. 生成多组搜索关键词
-    2. 逐组调用 fetch_fn 抓取
+    1. 生成多组「总结性」搜索关键词（标的 / 板块 / 概念题材 / 行业视角 / 大V）
+    2. 逐组调用 fetch_fn 抓取（代码维度优先 akshare 个股路径）
     3. 汇总所有结果并去重
     4. 解析为情绪事件
     """
-    keywords_pairs = build_search_keywords(name, sector)
+    keywords_pairs = build_search_keywords(name, sector, code)
     all_raw = []
     seen_queries = set()
+
+    # 代码维度：优先用代码抓取 akshare 个股新闻（强相关、与标的直接对应）
+    if code:
+        try:
+            code_res = fetch_fn(code, max_per_query)
+            if code_res:
+                for r in code_res:
+                    r["_search_query"] = code
+                    r["_search_label"] = "代码"
+                all_raw.extend(code_res)
+                seen_queries.add(code)
+        except Exception:
+            pass
 
     for label, query in keywords_pairs:
         if query in seen_queries:
@@ -517,6 +532,60 @@ def summarize_news(raw_news: list[dict]) -> str:
         return f"{tag}情绪：{neg_key}（抓取{len(raw_news)}条新闻）"
     else:
         return f"{tag}情绪（抓取{len(raw_news)}条新闻）"
+
+
+def summarize_news_by_events(events: list[tuple[str, int, str]]) -> str:
+    """
+    从已解析的情绪事件列表 [(date, score, title), ...] 生成一句情绪摘要。
+    与 summarize_news 区别在于输入已经是事件而非原始新闻 dict。
+    """
+    if not events:
+        return "暂无市场情绪数据"
+
+    total = sum(score for _, score, _ in events)
+    positive = [t for _, s, t in events if s > 0]
+    negative = [t for _, s, t in events if s < 0]
+
+    if total > 3:
+        tag = "利好"
+    elif total > 1:
+        tag = "偏多"
+    elif total < -3:
+        tag = "利空"
+    elif total < -1:
+        tag = "偏空"
+    else:
+        tag = "中性"
+
+    pos_key = ""
+    if positive:
+        p = positive[0]
+        for kw in ["突破", "利好", "看好", "流入", "增长", "涨停", "签约", "回购"]:
+            if kw in p:
+                pos_key = kw
+                break
+        if not pos_key:
+            pos_key = "偏多信号"
+
+    neg_key = ""
+    if negative:
+        n = negative[0]
+        for kw in ["风险", "利空", "下滑", "减持", "监管", "调查", "亏损", "制裁"]:
+            if kw in n:
+                neg_key = kw
+                break
+        if not neg_key:
+            neg_key = "利空信号"
+
+    count = len(events)
+    if positive and negative:
+        return f"{tag}情绪：{pos_key} vs {neg_key}（共{count}条情绪事件）"
+    elif positive:
+        return f"{tag}情绪：{pos_key}（共{count}条情绪事件）"
+    elif negative:
+        return f"{tag}情绪：{neg_key}（共{count}条情绪事件）"
+    else:
+        return f"{tag}情绪（共{count}条情绪事件）"
 
 
 def generate_events_from_price(

@@ -29,3 +29,8 @@ env/
 
 # 本地数据缓存（由 core/data_fetcher.py 自动生成）
 data_cache/
+
+# SQLite 持久化缓存（行情/净值/情绪事件本地缓存，运行时自动生成）
+data/*.db
+data/*.db-wal
+data/*.db-shm

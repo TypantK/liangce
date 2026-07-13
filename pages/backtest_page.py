@@ -366,7 +366,7 @@ def _render_common_metrics(m):
     c8.metric("买入持有", m["买入持有"])
 
 
-def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_summary=""):
+def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_summary="", sentiment_events=None):
     """交易明细表格（HTML 带颜色区分买卖方向）"""
     if not result["trades"]:
         st.info("本次回测期间无交易记录")
@@ -478,7 +478,12 @@ def _render_trade_table(result, sentiment_mode=False, raw_news=None, sentiment_s
     html_parts.append('</table>')
     st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
 
-    if sentiment_mode and raw_news:
+    if sentiment_mode and sentiment_events:
+        with st.expander(f"情绪事件来源：{sentiment_summary}"):
+            for _date, _score, _title in sentiment_events:
+                tag = "利好" if _score > 0 else ("利空" if _score < 0 else "中性")
+                st.markdown(f"- 【{tag}】{_title}")
+    elif sentiment_mode and raw_news:
         with st.expander(f"情绪事件来源：{sentiment_summary}"):
             for item in raw_news:
                 title = item.get("title", "")
@@ -745,10 +750,12 @@ def _render_fund(item, theme):
     if sentiment_mode:
         with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
             try:
-                raw_news = fetch_news(item["code"], max_results=12)
-                sentiment_events = parse_events_from_search(raw_news, item["code"])
+                from core.sentiment import search_and_parse_events
+                sector = item.get("sector") or item.get("板块") or item.get("类型")
+                sentiment_events = search_and_parse_events(
+                    fetch_news, item["name"], sector, code=item["code"], max_per_query=8)
                 if sentiment_events:
-                    sentiment_summary = summarize_news(raw_news)
+                    sentiment_summary = summarize_news_by_events(sentiment_events)
                 else:
                     st.sidebar.warning("未获取到相关新闻")
             except Exception:
@@ -871,7 +878,7 @@ def _render_fund(item, theme):
             st.info("当日无相关新闻（请先开启情绪模式）")
 
     # ---- 交易明细 ----
-    _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary)
+    _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary, sentiment_events)
 
     # ---- 策略横向对比 ----
     _render_compare_section(full_data, initial_cash, strategy_name, start_dt, end_dt,
@@ -908,10 +915,12 @@ def _render_backtest(item, theme):
     if sentiment_mode:
         with st.spinner(f"抓取 {item['name']} 相关市场新闻..."):
             try:
-                raw_news = fetch_news(item["code"], max_results=12)
-                sentiment_events = parse_events_from_search(raw_news, item["code"])
+                from core.sentiment import search_and_parse_events
+                sector = item.get("sector") or item.get("板块") or item.get("类型")
+                sentiment_events = search_and_parse_events(
+                    fetch_news, item["name"], sector, code=item["code"], max_per_query=8)
                 if sentiment_events:
-                    sentiment_summary = summarize_news(raw_news)
+                    sentiment_summary = summarize_news_by_events(sentiment_events)
                 else:
                     st.sidebar.warning("未获取到相关新闻")
             except Exception:
@@ -1038,7 +1047,7 @@ def _render_backtest(item, theme):
             st.info("当日无相关新闻（请先开启情绪模式）")
 
     # ---- 交易明细 ----
-    _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary)
+    _render_trade_table(result, sentiment_mode, raw_news, sentiment_summary, sentiment_events)
 
     # ---- 策略横向对比 ----
     _render_compare_section(full_data, initial_cash, strategy_name, start_dt, end_dt,
