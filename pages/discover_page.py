@@ -18,6 +18,127 @@ from core.engine import _make_logged_strategy
 
 
 # ============================================================
+#  每日复盘（借鉴 skill-market-daily-review 的章节结构，数据走自有免费源）
+# ============================================================
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_daily_review_cached():
+    """获取每日复盘数据（30 分钟缓存，避免扫描 rerun 时反复联网）。"""
+    from core.daily_review import build_daily_review
+    return build_daily_review()
+
+
+def _fmt_pct(v):
+    if v is None:
+        return "—"
+    color = "#e05252" if v > 0 else ("#2e9e5b" if v < 0 else "#9e9e9e")
+    sign = "+" if v > 0 else ""
+    return f"<span style='color:{color};font-weight:600'>{sign}{v:.2f}%</span>"
+
+
+def _fmt_num(v, unit=""):
+    return "—" if v is None else f"{v:,.0f}{unit}"
+
+
+def _render_daily_review(theme):
+    """渲染每日复盘面板：指数概览 / 市场宽度 / 行业热点 / 资金面。
+
+    原则（借鉴 daily-review）：只陈述事实、不做买卖建议；取不到的数据显示「—」，
+    绝不估算编造；顶部标注 T+1 数据口径与免责声明。
+    """
+    with st.expander("📋 今日市场复盘（点击展开 / 收起）", expanded=False):
+        review = _fetch_daily_review_cached()
+
+        as_of = review.get("as_of", "")
+        after_close = review.get("is_after_close", False)
+        stage = "盘后收盘数据" if after_close else "盘中/盘前，数据以最近收盘为准"
+        st.caption(
+            f"数据对应交易日：约 {as_of}（{stage}）｜ 生成于 {review.get('generated_at','')}"
+            "　—　本页仅客观陈述市场数据，不构成任何投资建议（只述不荐）"
+        )
+
+        # ---- 1. 指数概览 ----
+        st.markdown("**① 指数概览**")
+        idx = review.get("indices", {})
+        idx_list = idx.get("list", [])
+        if idx_list:
+            cols = st.columns(len(idx_list))
+            for c, it in zip(cols, idx_list):
+                price = "—" if it["price"] is None else f"{it['price']:.2f}"
+                c.markdown(
+                    f"<div style='text-align:center'><div style='font-size:12px;color:#9e9e9e'>{it['name']}</div>"
+                    f"<div style='font-size:18px;font-weight:700'>{price}</div>"
+                    f"<div style='font-size:13px'>{_fmt_pct(it['pct'])}</div></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("指数数据暂不可用")
+
+        # ---- 2. 市场宽度 ----
+        st.markdown("**② 市场宽度**")
+        b = review.get("breadth", {})
+        bc = st.columns(5)
+        bc[0].metric("上涨家数", _fmt_num(b.get("up")))
+        bc[1].metric("下跌家数", _fmt_num(b.get("down")))
+        bc[2].metric("平盘家数", _fmt_num(b.get("flat")))
+        bc[3].metric("涨停数", _fmt_num(b.get("limit_up")))
+        bc[4].metric("跌停数", _fmt_num(b.get("limit_down")))
+
+        # ---- 3. 行业热点 ----
+        st.markdown("**③ 行业热点**")
+        s = review.get("sectors", {})
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            st.caption("涨幅居前")
+            top = s.get("top", [])
+            if top:
+                for r in top:
+                    st.markdown(
+                        f"{r['name']}　{_fmt_pct(_safe_pct(r.get('pct')))}",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("暂不可用")
+        with sc2:
+            st.caption("跌幅居前")
+            bottom = s.get("bottom", [])
+            if bottom:
+                for r in bottom:
+                    st.markdown(
+                        f"{r['name']}　{_fmt_pct(_safe_pct(r.get('pct')))}",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("暂不可用")
+
+        # ---- 4. 资金面 ----
+        st.markdown("**④ 资金面**")
+        cap = review.get("capital", {})
+        north = cap.get("north")
+        st.markdown(
+            f"北向资金净流入（参考）：**{'—' if north is None else f'{north:,.2f} 亿元'}**",
+        )
+        st.caption(cap.get("north_note", ""))
+        inflow = cap.get("main_inflow", [])
+        if inflow:
+            st.caption("行业主力净流入居前（万元）")
+            df = pd.DataFrame(inflow)
+            if not df.empty and "inflow" in df.columns:
+                df["inflow"] = df["inflow"].map(lambda x: f"{x:,.0f}")
+                df.columns = ["行业", "主力净流入"]
+                st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("资金流数据暂不可用")
+
+
+def _safe_pct(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+# ============================================================
 #  辅助函数
 # ============================================================
 
@@ -470,6 +591,11 @@ def render():
     # ========== 标题 ==========
     st.title("发现")
     st.caption("用最新行情运行全部策略，扫描今日信号")
+
+    # ========== 每日市场复盘 ==========
+    # 扫描进行中不渲染复盘（避免与扫描 rerun 抢资源）；空闲时展示。
+    if not st.session_state._ds_running:
+        _render_daily_review(theme)
 
     # ========== 筛选区 ==========
     st.markdown("---")
