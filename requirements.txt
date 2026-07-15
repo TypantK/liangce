@@ -1,5 +1,5 @@
-# finance_app — 量化策略回测系统
-# 自动生成于 2026-06-10
+# finance_app - quant strategy backtest system
+# auto-generated on 2026-06-10
 
 streamlit>=1.28.0,<2.0
 pandas>=1.5.0,<3.0
@@ -13,7 +13,7 @@ ccxt>=4.2.0
 baostock>=0.8.8
 feedparser>=6.0.0
 
-# open-stock-data — A 股/美股历史数据多源聚合库
-# 如 PyPI 不可用，请从源安装：
+# open-stock-data - A-share/US multi-source history data aggregator
+# if PyPI unavailable, install from source:
 #   pip install git+https://github.com/your-repo/open-stock-data.git
 open-stock-data>=0.1.0
