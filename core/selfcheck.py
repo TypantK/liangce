@@ -388,13 +388,96 @@ class TestChannelDiagnostics(unittest.TestCase):
 
 
 # ===================================================================
+#  5. 页面冒烟（import 级门禁）
+# ===================================================================
+#
+# 历史教训：自测只测核心逻辑、不 import 页面，导致「页面模块顶层 NameError」
+# （如 discover_page 顶层调用未定义的 _classify_symbol）只有在用户打开网页
+# 点击导航时才会暴露，且错误发生在 streamlit 渲染层、不在 collector 覆盖范围内。
+# 因此新增本类：逐一 import 各页面模块（模拟用户打开导航 / app.py __import__），
+# 并模拟调用页面内关键纯函数，把这类「启动期/import 期」错误提前到自测阶段捕获。
+
+import importlib
+
+# 所有需冒烟的页面模块（与 app.py 的 PAGES 对应；跳过备份文件 *_bak）
+_PAGE_MODULES = [
+    "pages.discover_page",
+    "pages.backtest_page",
+    "pages.optimize_page",
+    "pages.sector_prediction",
+    "pages.about_page",
+]
+
+# 各页面「关键纯函数」冒烟：模拟你在测试里调用它们，验证可被正常调用不抛 NameError
+_PAGE_FUNC_SMOKE = {
+    "pages.discover_page": ("_classify_symbol", ("600000.SH",), "A股"),
+    "pages.backtest_page": ("_parse_pct", ("12.34%",), 12.34),
+    "pages.optimize_page": ("METRIC_LABELS", None, None),  # 取模块级常量
+    "pages.sector_prediction": ("score_headline", ("业绩超预期涨停",), None),
+    "pages.about_page": (None, None, None),  # 无合适纯函数，仅验证 import
+}
+
+
+class TestPageSmoke(unittest.TestCase):
+    """页面 import 级门禁：模拟用户打开导航，捕获顶层 NameError / 缺失依赖。"""
+
+    def _import_page(self, modname):
+        try:
+            mod = importlib.import_module(modname)
+        except Exception as e:  # noqa: BLE001
+            self.fail(f"导入页面模块 {modname} 抛异常（顶层代码错误）: {type(e).__name__}: {e}")
+        return mod
+
+    def test_all_pages_importable(self):
+        """逐一 import 所有页面，任何顶层异常都会使该用例失败。"""
+        for modname in _PAGE_MODULES:
+            with self.subTest(page=modname):
+                self._import_page(modname)
+
+    def test_page_critical_functions_callable(self):
+        """模拟调用各页面关键函数，验证其已定义且可正常调用（不抛 NameError）。"""
+        for modname, spec in _PAGE_FUNC_SMOKE.items():
+            func_name, args, expected = spec
+            if func_name is None:
+                continue  # 仅验证 import
+            with self.subTest(page=modname, func=func_name):
+                mod = self._import_page(modname)
+                if not hasattr(mod, func_name):
+                    self.fail(f"{modname} 缺少关键函数 {func_name}（定义缺失/顺序错误）")
+                target = getattr(mod, func_name)
+                try:
+                    if args is None:
+                        # 取常量/属性
+                        _ = target
+                    else:
+                        result = target(*args)
+                        if expected is not None:
+                            # 对数值/字符串做宽松断言
+                            if isinstance(expected, (int, float)):
+                                self.assertAlmostEqual(float(result), float(expected), places=2)
+                except Exception as e:  # noqa: BLE001
+                    self.fail(
+                        f"调用 {modname}.{func_name}{args or ''} 抛异常: {type(e).__name__}: {e}")
+
+    def test_discover_pool_built(self):
+        """discover_page 顶层标的池应能正确构建（回归本次 _classify_symbol 缺陷）。"""
+        mod = self._import_page("pages.discover_page")
+        self.assertTrue(hasattr(mod, "_DISCOVER_STOCK_ITEMS"),
+                        "discover_page 缺少 _DISCOVER_STOCK_ITEMS")
+        items = mod._DISCOVER_STOCK_ITEMS
+        self.assertGreater(len(items), 0, "_DISCOVER_STOCK_ITEMS 为空")
+        for name, code, cat in items:
+            self.assertIsInstance(cat, str, f"标的 {name} 分类结果非字符串")
+
+
+# ===================================================================
 #  套件入口
 # ===================================================================
 
 def load_tests(loader, tests, pattern):
     suite = unittest.TestSuite()
     for cls in (TestDataStore, TestDataFetcherNormalize, TestSentimentScoring,
-                TestStrategiesNoBlock, TestChannelDiagnostics):
+                TestStrategiesNoBlock, TestChannelDiagnostics, TestPageSmoke):
         suite.addTests(loader.loadTestsFromTestCase(cls))
     return suite
 

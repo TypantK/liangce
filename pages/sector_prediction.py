@@ -19,6 +19,7 @@ from utils.chart import (UP_GREEN, DN_RED, CN_FONT,
 from utils.table_render import render_table
 from core.sentiment_fetcher import fetch_news
 from core.sentiment import score_headline, format_sentiment_tag
+from utils import run_logger
 
 
 # ============================================================
@@ -510,6 +511,7 @@ def _plot_prediction(df, future_dates, bull_ohlc, base_ohlc, bear_ohlc, tech, th
 # ============================================================
 
 def render():
+    run_logger.log_run("sector_prediction", "render", ok=True, detail="页面渲染开始")
     theme = st.session_state.get("_theme_mode", "dark")
 
     # ========== 标题 ==========

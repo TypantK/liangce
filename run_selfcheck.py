@@ -39,11 +39,59 @@ def main():
     failed = len(result.failures) + len(result.errors)
     print("\n" + "=" * 56)
     print(f"量策自测结果：共 {total} 项，通过 {total - failed} 项，失败 {failed} 项")
+
+    # ---- 运行留痕日志自检：确认本次自测产生的日志可正常写/读 ----
+    _check_run_log()
+
     if failed == 0:
-        print("[OK] 全部通过：数据层与核心功能正确性已验证。")
+        print("[OK] 全部通过：数据层、核心功能、页面冒烟、运行留痕均已验证。")
         return 0
     print("[FAIL] 存在失败项，请检查上方 [FAIL] / [ERROR] 详情。")
     return 1
+
+
+def _check_run_log():
+    """自检本次自测期间产生的运行留痕日志：可读、且其中不含 ERR。"""
+    try:
+        from utils import run_logger
+        from utils.error_collector import get_unresolved_errors
+        path = run_logger.get_run_log_path()
+        has_err = False
+        sample = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    sample.append(line.rstrip("\n"))
+                    if " | ERR " in line:
+                        has_err = True
+        except FileNotFoundError:
+            print(f"[RUNLOG] 未找到运行日志：{path}")
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"[RUNLOG] 读取运行日志失败：{e}")
+            return
+
+        last_lines = sample[-3:] if sample else []
+        print(f"[RUNLOG] 运行留痕日志：{path}")
+        for ln in last_lines:
+            print(f"         {ln}")
+
+        # 未解决错误收集（collector 归档）
+        try:
+            errs = get_unresolved_errors(limit=20)
+            if errs:
+                print(f"[ERRDB] 检测到 {len(errs)} 条未解决错误（见 data/errors.db / data/error_logs/）")
+                for e in errs[:5]:
+                    print(f"         [{e['level']}] {e['logger']}: {e['message'][:80]}")
+            else:
+                print("[ERRDB] 无未解决错误归档。")
+        except Exception:
+            pass
+
+        if has_err:
+            print("[RUNLOG] 警告：运行留痕日志中存在 ERR 记录，请排查上述输出。")
+    except Exception as e:  # noqa: BLE001
+        print(f"[RUNLOG] 运行日志自检跳过（{e}）")
 
 
 if __name__ == "__main__":

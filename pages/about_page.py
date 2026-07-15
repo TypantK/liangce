@@ -8,12 +8,15 @@ import sys
 import subprocess
 import streamlit as st
 
+from utils import run_logger
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
 def render():
+    run_logger.log_run("about_page", "render", ok=True, detail="页面渲染开始")
     st.title("关于「量策」")
 
     col1, col2 = st.columns(2)
@@ -122,3 +125,16 @@ def render():
                         f"（{e['last_seen']}）：{e['message'][:120]}"
                     )
                 st.caption("完整日志见 data/error_logs/ 与归档库 data/errors.db")
+
+        with st.expander("查看运行留痕日志（最近 30 行）", expanded=False):
+            try:
+                path = run_logger.get_run_log_path()
+                if not os.path.exists(path):
+                    st.caption("暂无运行留痕日志（还没有打开过页面 / 跑过自测）。")
+                else:
+                    with open(path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()[-30:]
+                    st.code("".join(lines) or "（空）", language="text")
+                    st.caption(f"完整运行留痕见 {path}")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"读取运行留痕失败：{e}")

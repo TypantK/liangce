@@ -13,6 +13,7 @@ from core.data_fetcher import STOCK_POOL, get_stock_data
 from core.strategies import STRATEGY_REGISTRY
 from core.optimizer import grid_search, optuna_optimize, METRIC_LABELS
 from utils.chart import build_enhanced_chart_html, inject_hotkey_bridge_once
+from utils import run_logger
 
 # ---- 深色主题配色（与 chart.py 对齐）----
 BG       = '#131520'
@@ -93,6 +94,7 @@ def _build_heatmap(result, theme="dark"):
 
 
 def render():
+    run_logger.log_run("optimize_page", "render", ok=True, detail="页面渲染开始")
     st.title("参数优化")
 
     # ========== 侧边栏：主题 ==========

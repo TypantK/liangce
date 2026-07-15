@@ -16,6 +16,7 @@ from core.strategies import STRATEGY_REGISTRY
 from core.data_fetcher import STOCK_POOL, get_stock_data, get_fund_nav, fund_nav_to_ohlcv
 from core.engine import _make_logged_strategy
 from core import insight as insight_module
+from utils import run_logger
 
 
 # ============================================================
@@ -164,6 +165,24 @@ ASSET_CATEGORY = {
     '基金': '基金',
 }
 
+
+def _classify_symbol(code, asset_type=None):
+    """按资产类型分类标的（优先使用 pool 中声明的类型，避免代码后缀误判）。
+
+    注意：本函数在模块顶层 _DISCOVER_STOCK_ITEMS 之前定义，避免 import 时 NameError。
+    """
+    if asset_type in ASSET_CATEGORY:
+        return ASSET_CATEGORY[asset_type]
+    if code.startswith('SECTOR:'):
+        return '板块指数'
+    if code.endswith(('.SZ', '.SH')):
+        return 'A股'
+    elif 'USDT' in code:
+        return '加密货币'
+    else:
+        return '美股'
+
+
 # 发现页扩展标的池：除固定股票外，额外纳入板块指数与基金。
 # 每项结构：(展示名, 抓取代码, 资产类型)
 #   - 股票/板块/加密直接走 get_stock_data（板块代码形如 SECTOR:白酒）
@@ -171,7 +190,8 @@ ASSET_CATEGORY = {
 # STOCK_POOL 是 {名称: 代码} 的 2 元组映射，这里统一补上资产类型，
 # 与下方板块/基金合并成统一的 (名称, 代码, 类型) 三元组池。
 _DISCOVER_STOCK_ITEMS = [
-    (name, code, _classify_symbol(code)) for name, code in STOCK_POOL.items()
+    (name, code, run_logger.timed_call("discover_page", "_classify_symbol", _classify_symbol, code))
+    for name, code in STOCK_POOL.items()
 ]
 
 DISCOVER_POOL = _DISCOVER_STOCK_ITEMS + [
@@ -191,20 +211,6 @@ DISCOVER_POOL = _DISCOVER_STOCK_ITEMS + [
     ("招商中证白酒",  "161725",            "基金"),
     ("易方达蓝筹",    "005827",            "基金"),
 ]
-
-
-def _classify_symbol(code, asset_type=None):
-    """按资产类型分类标的（优先使用 pool 中声明的类型，避免代码后缀误判）"""
-    if asset_type in ASSET_CATEGORY:
-        return ASSET_CATEGORY[asset_type]
-    if code.startswith('SECTOR:'):
-        return '板块指数'
-    if code.endswith(('.SZ', '.SH')):
-        return 'A股'
-    elif 'USDT' in code:
-        return '加密货币'
-    else:
-        return '美股'
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -692,6 +698,7 @@ def _show_results(theme):
 #  render()
 # ============================================================
 def render():
+    run_logger.log_run("discover_page", "render", ok=True, detail="页面渲染开始")
     theme = st.session_state.get("_theme_mode", "dark")
     _init_scan_state()
 
@@ -774,3 +781,4 @@ def render():
             </style>
             """, unsafe_allow_html=True)
         st.info("点击「开始扫描」运行全部策略")
+    run_logger.log_run("discover_page", "render", ok=True, detail="页面渲染完成")
