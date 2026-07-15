@@ -744,10 +744,13 @@ def render():
 
     # 情况 1：正在扫描中 → 继续处理
     if st.session_state._ds_running:
-        # _continue_scan 内部已处理 rerun（中间批次 rerun 继续；最后一批 rerun 进入结果展示），
-        # 因此这里无需再 rerun；用 return 防止脚本继续往下走（避免重复渲染筛选区）。
         _continue_scan()
-        return
+        # 中间批次：_continue_scan 内部 st.rerun() 已抛 RerunException，不会走到这里
+        # 最后一批：_continue_scan 设 _ds_running=False 后正常返回，让脚本继续走情况 3 展示结果
+        if st.session_state._ds_running:
+            # 理论上走不到（中间批次已被 rerun 中断），但防御性返回
+            return
+        # _ds_running=False → 继续到情况 3
 
     # 情况 2：用户点击扫描按钮
     if scan_btn:
