@@ -25,9 +25,49 @@ from utils import run_logger
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_daily_review_cached():
-    """获取每日复盘数据（30 分钟缓存，避免扫描 rerun 时反复联网）。"""
+    """获取每日复盘数据（30 分钟缓存，避免扫描 rerun 时反复联网）。
+
+    网络请求超时保护：用 threading + timeout 兜底，避免 akshare/东财请求卡住
+    导致整个 discover_page 渲染阻塞（按钮不可见）。
+    """
+    import threading
     from core.daily_review import build_daily_review
-    return build_daily_review()
+
+    result_container = {"data": None, "error": None}
+
+    def _worker():
+        try:
+            result_container["data"] = build_daily_review()
+        except Exception as e:
+            result_container["error"] = str(e)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=25)  # 最多等 25 秒
+
+    if t.is_alive():
+        # 超时：返回空复盘数据，不阻塞页面
+        return {
+            "as_of": "", "generated_at": "",
+            "is_after_close": False,
+            "indices": {"list": []},
+            "breadth": {"up": None, "down": None, "flat": None, "limit_up": None, "limit_down": None},
+            "sectors": {"top": [], "bottom": []},
+            "capital": {"north": None, "north_note": "数据加载超时", "main_inflow": []},
+            "_validation": {"ok": False, "errors": ["每日复盘数据加载超时（>25s），请稍后刷新页面重试"], "warnings": []},
+        }
+    if result_container["error"]:
+        # 异常：返回空复盘数据
+        return {
+            "as_of": "", "generated_at": "",
+            "is_after_close": False,
+            "indices": {"list": []},
+            "breadth": {"up": None, "down": None, "flat": None, "limit_up": None, "limit_down": None},
+            "sectors": {"top": [], "bottom": []},
+            "capital": {"north": None, "north_note": f"数据加载失败: {result_container['error'][:80]}", "main_inflow": []},
+            "_validation": {"ok": False, "errors": [f"每日复盘数据加载异常: {result_container['error'][:80]}"], "warnings": []},
+        }
+    return result_container["data"]
 
 
 def _fmt_pct(v):
@@ -707,12 +747,8 @@ def render():
     st.title("发现")
     st.caption("用最新行情运行全部策略，扫描今日信号")
 
-    # ========== 每日市场复盘 ==========
-    # 扫描进行中不渲染复盘（避免与扫描 rerun 抢资源）；空闲时展示。
-    if not st.session_state._ds_running:
-        _render_daily_review(theme)
-
     # ========== 筛选区 ==========
+    # 筛选区与扫描按钮必须在每日复盘之前渲染，避免复盘网络请求阻塞导致按钮不可见。
     st.markdown("---")
     col1, col2, col3 = st.columns([2, 2, 1])
 
@@ -738,6 +774,12 @@ def render():
             use_container_width=True,
             disabled=st.session_state._ds_running
         )
+
+    # ========== 每日市场复盘 ==========
+    # 扫描进行中不渲染复盘（避免与扫描 rerun 抢资源）；空闲时展示。
+    # 注意：复盘渲染放在按钮之后，确保即使复盘数据加载慢，按钮也已可见。
+    if not st.session_state._ds_running:
+        _render_daily_review(theme)
 
     # ========== 扫描状态机路由 ==========
 
