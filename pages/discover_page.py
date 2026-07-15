@@ -528,6 +528,8 @@ def _continue_scan():
         import time; time.sleep(0.05)
         st.rerun()
     else:
+        # 最后一批：仅设状态，**不要 rerun**，让 render() 自然走到「情况3」展示结果。
+        # 这样避免「扫描中帧」与「完成帧」在 streamlit 客户端短暂共存导致的"两行"视觉问题。
         st.session_state._ds_running = False
 
 
@@ -742,9 +744,10 @@ def render():
 
     # 情况 1：正在扫描中 → 继续处理
     if st.session_state._ds_running:
+        # _continue_scan 内部已处理 rerun（中间批次 rerun 继续；最后一批 rerun 进入结果展示），
+        # 因此这里无需再 rerun；用 return 防止脚本继续往下走（避免重复渲染筛选区）。
         _continue_scan()
-        # _continue_scan 内部会 rerun，只有完成时才走到这里
-        st.rerun()  # 完成后刷新一次，进入结果展示
+        return
 
     # 情况 2：用户点击扫描按钮
     if scan_btn:

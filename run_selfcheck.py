@@ -43,6 +43,9 @@ def main():
     # ---- 运行留痕日志自检：确认本次自测产生的日志可正常写/读 ----
     _check_run_log()
 
+    # ---- 扫描流程单帧无重复门禁：防止「两行」渲染回归 ----
+    _check_scan_no_duplicate()
+
     if failed == 0:
         print("[OK] 全部通过：数据层、核心功能、页面冒烟、运行留痕均已验证。")
         return 0
@@ -92,6 +95,19 @@ def _check_run_log():
             print("[RUNLOG] 警告：运行留痕日志中存在 ERR 记录，请排查上述输出。")
     except Exception as e:  # noqa: BLE001
         print(f"[RUNLOG] 运行日志自检跳过（{e}）")
+
+
+def _check_scan_no_duplicate():
+    """自检扫描流程单帧无重复渲染（防止「两行」回归）。"""
+    try:
+        from core import scan_smoke
+        res = scan_smoke.run_check(timeout=20)
+        if res["ok"]:
+            print(f"[SCAN_SMOKE] {res['details']}")
+        else:
+            print(f"[SCAN_SMOKE] FAIL：{res['details']}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[SCAN_SMOKE] 跳过（{e}）")
 
 
 if __name__ == "__main__":
