@@ -69,13 +69,14 @@ def _continue_scan():
             res = dp._scan_symbol_strategy(sym_name, sym_code, strat_name, sym_cat)
             if res is not None:
                 st.session_state._ds_results.append(res)
+            else:
+                st.session_state._ds_failed.append(sym_name)
         except Exception:
-            pass
+            st.session_state._ds_failed.append(sym_name)
     st.session_state._ds_cursor = cursor + 1
     if st.session_state._ds_cursor < total:
         st.progress(st.session_state._ds_cursor / total,
                     text=f"扫描中... {st.session_state._ds_cursor}/{total}")
-        time.sleep(0.01)
         st.rerun()
     else:
         st.session_state._ds_running = False

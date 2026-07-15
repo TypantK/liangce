@@ -525,7 +525,6 @@ def _continue_scan():
         next_name = pool[done][0] if done < total else ""
         st.progress(done / total,
             text=f"扫描中... {done}/{total} 个标的，下一个: {next_name}")
-        import time; time.sleep(0.05)
         st.rerun()
     else:
         # 最后一批：仅设状态，**不要 rerun**，让 render() 自然走到「情况3」展示结果。
