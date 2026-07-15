@@ -333,17 +333,20 @@ def fetch_news(query: str, max_results: int = 6) -> list:
         ("duckduckgo", lambda: _search_duckduckgo(query, max_results)),
         ("google_news", lambda: _search_google_news_rss(query, max_results)),
     ]
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_map = {executor.submit(fn): name for name, fn in web_channels}
-        for future in as_completed(future_map, timeout=_FETCH_TIMEOUT):
-            name = future_map[future]
-            try:
-                results = future.result(timeout=_CHANNEL_TIMEOUT)
-                if results:
-                    logger.info(f"web 通道 {name} 返回 {len(results)} 条")
-                    return results[:max_results]
-            except Exception as e:
-                logger.warning(f"web 通道 {name} 失败: {e}")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_map = {executor.submit(fn): name for name, fn in web_channels}
+            for future in as_completed(future_map, timeout=_FETCH_TIMEOUT):
+                name = future_map[future]
+                try:
+                    results = future.result(timeout=_CHANNEL_TIMEOUT)
+                    if results:
+                        logger.info(f"web 通道 {name} 返回 {len(results)} 条")
+                        return results[:max_results]
+                except Exception as e:
+                    logger.warning(f"web 通道 {name} 失败: {e}")
+    except TimeoutError:
+        logger.warning("web 通道全部超时，降级到示例数据")
 
     logger.warning("所有通道均失败，降级到示例数据")
     results = _sample_news(query)
